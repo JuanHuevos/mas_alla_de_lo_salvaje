@@ -1,0 +1,1580 @@
+/**
+ * MÁS ALLÁ DE LO SALVAJE - Base de Datos del Juego
+ * Sistema de Gestión de Asentamientos v2.0
+ * Con sistema de herencia de biomas y niveles de abundancia
+ */
+
+// =====================================================
+// NIVELES DE ABUNDANCIA DE RECURSOS
+// =====================================================
+const NIVELES_ABUNDANCIA = {
+    "Inexistente": { valor: -99, modificador: null, descripcion: "No se puede recolectar" },
+    "Escaso": { valor: 2, modificador: -2, descripcion: "Producción penalizada" },
+    "Normal": { valor: 3, modificador: 0, descripcion: "Producción estándar" },
+    "Abundante": { valor: 4, modificador: 1, descripcion: "Bonificación por terreno favorable" },
+    "Exuberante": { valor: 5, modificador: 2, descripcion: "Máximo rendimiento" }
+};
+
+// =====================================================
+// SISTEMA DE UNIDADES (Medidas y Cuotas)
+// =====================================================
+const CONVERSION = {
+    CUOTA_POBLACION: 20,  // 1 Cuota = 20 colonos (medidas)
+    CUOTA_RECURSOS: 10,   // 1 Cuota = 10 medidas de recurso
+    CUOTA_DOBLONES: 10    // 1 Cuota = 10 medidas de oro
+};
+
+// Multiplicadores de abundancia para extracción
+const MULTIPLICADORES_ABUNDANCIA = {
+    "Inexistente": 0,
+    "Escaso": 0.5,
+    "Normal": 1.0,
+    "Abundante": 1.5,
+    "Exuberante": 2.0
+};
+
+// =====================================================
+// NATURALEZAS DE POBLACIÓN
+// =====================================================
+const NATURALEZAS_POBLACION = {
+    "Neutral": {
+        icono: "👤",
+        ejemplos: "Humanos, Elfos, Medianos",
+        modCalidad: 0,
+        bonoInmigracion: 0,
+        compatibilidad: "Universal",
+        descripcion: "Adaptabilidad estándar"
+    },
+    "Positiva": {
+        icono: "😇",
+        ejemplos: "Aasimares, Seres Celestiales",
+        modCalidad: 2,
+        bonoInmigracion: 0,
+        compatibilidad: "Solo Positivas/Neutras",
+        descripcion: "Aumentan la paz social"
+    },
+    "Negativa": {
+        icono: "😈",
+        ejemplos: "Orcos, Drows, Tieflings",
+        modCalidad: -2,
+        bonoInmigracion: 0,
+        compatibilidad: "Solo Negativas/Neutras",
+        descripcion: "Alta resistencia física"
+    },
+    "Monstruo": {
+        icono: "👹",
+        ejemplos: "Kobolds, Goblins, Minotauros",
+        modCalidad: -1,
+        bonoInmigracion: 5,
+        compatibilidad: "Específicas de especie",
+        descripcion: "Mayor tasa de reproducción"
+    }
+};
+
+// =====================================================
+// ROLES DE POBLACIÓN
+// =====================================================
+const ROLES_POBLACION = {
+    "Plebeyo": {
+        icono: "👨‍🌾",
+        funcion: "Crecimiento y labor general",
+        beneficio: "+1 colono/turno por cuota",
+        requisito: null,
+        color: "#8B4513"
+    },
+    "Académico": {
+        icono: "📚",
+        funcion: "Investigación y Magia",
+        beneficio: "+3 Ideas/turno",
+        requisito: "Escuela o Academia",
+        color: "#4169E1"
+    },
+    "Artesano": {
+        icono: "🔨",
+        funcion: "Producción y Comercio",
+        beneficio: "+1 Doblón en mercados",
+        requisito: "Taller o Manufactura",
+        color: "#DAA520"
+    },
+    "Soldado": {
+        icono: "⚔️",
+        funcion: "Defensa y Orden",
+        beneficio: "Mantiene guarnición",
+        requisito: "Cuartel",
+        color: "#DC143C"
+    }
+};
+
+// =====================================================
+// ESTADÍSTICAS CON COLOR INVERTIDO
+// =====================================================
+const STATS_INVERTIDAS = [
+    "Mantenimiento",
+    "Coste de Movilidad",
+    "Coste de construcción",
+    "Coste de Construcción",
+    "Consumo de Suministros Militares"
+];
+
+function esStatInvertida(statName) {
+    return STATS_INVERTIDAS.some(inv =>
+        statName.toLowerCase().includes(inv.toLowerCase()) ||
+        statName.toLowerCase().includes("coste")
+    );
+}
+
+// =====================================================
+// BIOMAS BASE (Sub-Biomas para herencia)
+// =====================================================
+const BIOMAS_BASE = {
+    "Bosque Llano": {
+        id: 1,
+        icono: "🌲",
+        dado: "d10",
+        // Lista 1: Recursos indexados 1-10
+        recursos: [
+            "Madera Útil",        // 1
+            "Frutos y Tubérculos", // 2
+            "Pieles",             // 3
+            "Carnes",             // 4
+            "Fibras Útiles",      // 5
+            "Tintes",             // 6
+            "Pesca",              // 7
+            "Roca",               // 8
+            "Sal",                // 9
+            "Caucho"              // 10
+        ],
+        // Exóticos d4: Bosque/Humedal comparten tabla
+        exoticos: ["Pieles Exóticas", "Guano", "Textiles Mágicos", "Especias Exóticas"],
+        dadoExotico: "d4",
+        propiedadesBase: ["Tierra Fértil", "Paraíso Animal", "Agua abundante", "Caminos Claros"],
+        influenciaMagica: "Baja",
+        descripcion: "Bosques templados con abundante vegetación"
+    },
+    "Humedal": {
+        id: 2,
+        icono: "🐊",
+        dado: "d8",
+        // Lista 2: Recursos indexados 1-8
+        recursos: [
+            "Madera Útil",   // 1
+            "Pieles",        // 2
+            "Fibras Útiles", // 3
+            "Tintes",        // 4
+            "Pesca",         // 5
+            "Roca",          // 6
+            "Guano",         // 7
+            "Caucho"         // 8
+        ],
+        // Exóticos d4: Bosque/Humedal comparten tabla
+        exoticos: ["Pieles Exóticas", "Guano", "Textiles Mágicos", "Especias Exóticas"],
+        dadoExotico: "d4",
+        propiedadesBase: ["Agua abundante", "Hierba Alta"],
+        influenciaMagica: "Baja",
+        descripcion: "Pantanos y marismas"
+    },
+    "Árido": {
+        id: 3,
+        icono: "🌵",
+        dado: "d8",
+        // Lista 3: Recursos indexados 1-8
+        recursos: [
+            "Pieles",            // 1
+            "Carnes",            // 2
+            "Marfiles",          // 3
+            "Especias Exóticas", // 4
+            "Textiles",          // 5
+            "Tintes",            // 6
+            "Pesca",             // 7
+            "Roca"               // 8
+        ],
+        // Exóticos d4: Árido
+        exoticos: ["Metales", "Cristales Mágicos", "Textiles Mágicos", "Reliquias"],
+        dadoExotico: "d4",
+        propiedadesBase: ["Desolado", "Caminos Claros"],
+        influenciaMagica: "Baja",
+        descripcion: "Tierras secas con escasa vegetación"
+    },
+    "Desértico": {
+        id: 4,
+        icono: "🏜️",
+        dado: "d6",
+        // Lista 4: Recursos indexados 1-6
+        recursos: [
+            "Marfiles",          // 1
+            "Especias Exóticas", // 2
+            "Textiles",          // 3
+            "Tintes",            // 4
+            "Metales",           // 5
+            "Guano"              // 6
+        ],
+        // Exóticos d6: Desértico tiene 6 opciones
+        exoticos: ["Joyas", "Cristales Mágicos", "Metales Preciosos", "Reliquias", "Textiles Mágicos", "Fuente de Energía"],
+        dadoExotico: "d6",
+        propiedadesBase: ["Sofocante", "Desolado"],
+        influenciaMagica: "Baja",
+        descripcion: "Desiertos inhóspitos"
+    },
+    "Tundra": {
+        id: 5,
+        icono: "🦌",
+        dado: "d10",
+        // Lista 5: Recursos indexados 1-10
+        recursos: [
+            "Madera Útil",        // 1
+            "Frutos y Tubérculos", // 2
+            "Pieles",             // 3
+            "Carnes",             // 4
+            "Fibras Útiles",      // 5
+            "Carbón",             // 6
+            "Pesca",              // 7
+            "Roca",               // 8
+            "Sal",                // 9
+            "Caucho"              // 10
+        ],
+        // Exóticos d4: Tundra
+        exoticos: ["Guano", "Hielo Eterno", "Maderas Preciosas", "Metales"],
+        dadoExotico: "d4",
+        propiedadesBase: ["Helado", "Paraíso Animal"],
+        influenciaMagica: "Baja",
+        descripcion: "Llanuras frías con permafrost"
+    },
+    "Parajes Helados": {
+        id: 6,
+        icono: "❄️",
+        dado: "d8",
+        // Lista 6: Recursos indexados 1-8
+        recursos: [
+            "Marfiles",        // 1
+            "Pieles",          // 2
+            "Carnes",          // 3
+            "Pieles Exóticas", // 4
+            "Mantecas",        // 5
+            "Pesca",           // 6
+            "Sal",             // 7
+            "Hielo Eterno"     // 8
+        ],
+        // Exóticos d4: Parajes Helados
+        exoticos: ["Guano", "Metales Preciosos", "Pesca Exótica", "Reliquias"],
+        dadoExotico: "d4",
+        propiedadesBase: ["Helado", "Intransitable"],
+        influenciaMagica: "Baja",
+        descripcion: "Territorios congelados"
+    }
+};
+
+// =====================================================
+// BIOMAS ESPECIALES (Capas de superposición)
+// =====================================================
+const BIOMAS_ESPECIALES = {
+    "Montañoso": {
+        idRango: [7], // d12 = 7
+        icono: "⛰️",
+        propiedadesCapa: ["Intransitable", "Terrazas Obstruidas"],
+        recursosGarantizados: ["Metales", "Joyas", "Roca", "Carbón"],
+        exoticosGarantizados: ["Fuente de Energía Natural"],
+        peculiaridadFija: "Terreno Inestable",
+        dadoPeculiaridades: "2d6",
+        influenciaMagica: "Media",
+        descripcion: "Cordilleras y picos elevados"
+    },
+    "Yermo": {
+        idRango: [8], // d12 = 8
+        icono: "💨",
+        propiedadesCapa: ["Infértil", "Desolado", "Caminos Claros"],
+        recursosGarantizados: [], // Hereda del sub-bioma
+        exoticosGarantizados: [], // Lanza 2d6 en sub-bioma
+        peculiaridadFija: null,
+        dadoPeculiaridades: "2d6",
+        influenciaMagica: "Baja",
+        descripcion: "Tierras yermas y despobladas"
+    },
+    "Tierras Malditas": {
+        idRango: [9], // d12 = 9
+        icono: "💀",
+        propiedadesCapa: ["Desolado", "Maldito"],
+        recursosGarantizados: ["Reliquias"],
+        exoticosGarantizados: ["Fuente de Energía Negativa"],
+        peculiaridadFija: null,
+        dadoPeculiaridades: "2d6",
+        influenciaMagica: "Media",
+        descripcion: "Territorios corrompidos por energía oscura"
+    },
+    "Tierras Caóticas": {
+        idRango: [10], // d12 = 10
+        icono: "🌀",
+        propiedadesCapa: ["Terrazas Obstruidas", "Influencia Energética"],
+        recursosGarantizados: ["Cristales Mágicos"],
+        exoticosGarantizados: ["Fuente de Energía Salvaje"],
+        peculiaridadFija: null,
+        dadoPeculiaridades: "2d6",
+        influenciaMagica: "Alta",
+        descripcion: "Zonas de inestabilidad mágica"
+    },
+    "Tierras Consagradas": {
+        idRango: [11], // d12 = 11
+        icono: "✝️",
+        propiedadesCapa: ["Caminos Claros", "Bendito"],
+        recursosGarantizados: ["Reliquias"],
+        exoticosGarantizados: ["Fuente de Energía Positiva"],
+        peculiaridadFija: null,
+        dadoPeculiaridades: "2d6",
+        influenciaMagica: "Media",
+        descripcion: "Lugares sagrados y bendecidos"
+    }
+};
+
+// =====================================================
+// PROPIEDADES DEL TERRENO (19 tipos)
+// =====================================================
+const PROPIEDADES = {
+    "Tierra Fértil": {
+        efectos: {
+            "Producción Agrícola": 1,
+            "Frutos y Tubérculos": 1,
+            "Madera Útil": 1,
+            "Cualquier Textil": 1,
+            "Fibras Útiles": 1,
+            "Caucho": 1,
+            "Cualquier Tinte": 1
+        },
+        icono: "🌱",
+        descripcion: "Suelos ricos y fértiles ideales para la agricultura"
+    },
+    "Paraíso Animal": {
+        efectos: {
+            "Carne": 1,
+            "Cualquier piel": 1,
+            "Cualquier pesca": 1,
+            "Consumo de Suministros Militares": -1
+        },
+        icono: "🦌",
+        descripcion: "Abundancia de fauna silvestre"
+    },
+    "Agua abundante": {
+        efectos: {
+            "Coste de Movilidad": -1,
+            "Producción Agrícola": 1,
+            "Mantenimiento": 1,
+            "Consumo de Suministros Militares": -1
+        },
+        icono: "💧",
+        descripcion: "Ríos, lagos o manantiales abundantes"
+    },
+    "Caminos Claros": {
+        efectos: {
+            "Coste de Movilidad": -1,
+            "Calidad": 1
+        },
+        icono: "🛤️",
+        descripcion: "Rutas bien definidas y transitables"
+    },
+    "Terrazas Obstruidas": {
+        efectos: {
+            "Coste de Movilidad": 1,
+            "Coste de construcción (Todos los recursos)": 1,
+            "Consumo de Suministros Militares": 1,
+            "Defensa en trincheras y asedios": 1,
+            "Sigilo": 1
+        },
+        icono: "🏔️",
+        descripcion: "Terreno difícil pero defensivo"
+    },
+    "Sofocante": {
+        efectos: {
+            "Producción Agrícola": -1,
+            "Consumo de Suministros Militares": 1,
+            "Calidad": -1,
+            "Mantenimiento": 1,
+            "Defensa (Todos)": -1
+        },
+        icono: "🥵",
+        descripcion: "Clima extremadamente caluroso"
+    },
+    "Hierba Alta": {
+        efectos: {
+            "Producción Agrícola": 1,
+            "Frutos y Tubérculos": 1,
+            "Fibras Útiles": 1,
+            "Cualquier Textil": 1,
+            "Defensa (Campo abierto)": -1,
+            "Sigilo": 1
+        },
+        icono: "🌾",
+        descripcion: "Praderas y pastizales extensos"
+    },
+    "Desolado": {
+        efectos: {
+            "Coste de Movilidad": -1,
+            "Coste de construcción (Todos los recursos)": -1,
+            "Consumo de Suministros Militares": 1,
+            "Detección": 1,
+            "Inmigración": -5
+        },
+        icono: "🏜️",
+        descripcion: "Tierra yerma y despoblada"
+    },
+    "Helado": {
+        efectos: {
+            "Producción Agrícola": -1,
+            "Coste de Movilidad": 1,
+            "Consumo de Suministros Militares": 1,
+            "Calidad": -1,
+            "Mantenimiento": -1,
+            "Ataque (Todos)": -1
+        },
+        icono: "❄️",
+        descripcion: "Clima gélido y nevado"
+    },
+    "Intransitable": {
+        efectos: {
+            "Producción Agrícola": -1,
+            "Coste de Movilidad": 4,
+            "Coste de construcción (Todos los recursos)": 1,
+            "Consumo de Suministros Militares": 1,
+            "Mantenimiento": 1,
+            "Ataque (A trincheras y asedio)": -1,
+            "Detección": -1,
+            "Inmigración": -5
+        },
+        icono: "🚫",
+        descripcion: "Terreno prácticamente imposible de atravesar"
+    },
+    "Infértil": {
+        efectos: {
+            "Producción Agrícola": -1,
+            "Frutos y Tubérculos": -1,
+            "Madera Útil": -1,
+            "Cualquier Textil": -1,
+            "Cualquier Tinte": -1,
+            "Calidad": -1
+        },
+        icono: "💀",
+        descripcion: "Suelos pobres y estériles"
+    },
+    "Maldito": {
+        efectos: {
+            "Mantenimiento": 1,
+            "Ataque (Monstruos)": 1,
+            "Calidad (Especies Neutrales)": -1,
+            "Calidad (Especies Positivas)": -2,
+            "Calidad (Especies Negativas)": -1,
+            "Capacidad Mágica": 2,
+            "Producción de Artilugios Mágicos": 1
+        },
+        icono: "👻",
+        descripcion: "Tierra corrompida por energías oscuras"
+    },
+    "Influencia Energética": {
+        efectos: {
+            "Mantenimiento": 1,
+            "Calidad": -1,
+            "Producción de Artilugios Mágicos": 1,
+            "Capacidad Mágica": 2
+        },
+        icono: "⚡",
+        descripcion: "Flujos de energía mágica inestables"
+    },
+    "Bendito": {
+        efectos: {
+            "Mantenimiento": -1,
+            "Defensa (Contra Monstruos)": 1,
+            "Calidad (Especies Positivas)": 2,
+            "Calidad (Especies Negativas)": -2,
+            "Producción de Artilugios Mágicos": 1
+        },
+        icono: "✨",
+        descripcion: "Tierra sagrada y protegida"
+    }
+};
+
+// =====================================================
+// PECULIARIDADES (15 tipos)
+// =====================================================
+const PECULIARIDADES = {
+    "Monstruos Comunes": {
+        efectos: {
+            "Mantenimiento": 1,
+            "Coste de Movilidad": 1,
+            "Producción de Artilugios Mágicos": 1,
+            "Cualquier piel": 1,
+            "Carne": 1,
+            "Inmigración (Monstruos)": 5
+        },
+        icono: "👹",
+        descripcion: "Criaturas hostiles merodean la zona"
+    },
+    "Presencia Feérica": {
+        efectos: {
+            "Mantenimiento": 1,
+            "Calidad": 1,
+            "Coste de Movilidad": 1,
+            "Textiles Mágicos": 1,
+            "Maderas Útiles": 1,
+            "Capacidad Mágica": 1
+        },
+        icono: "🧚",
+        descripcion: "Seres del mundo feérico habitan cerca"
+    },
+    "Círculo Druídico": {
+        efectos: {
+            "Coste de Construcción (Madera, Roca, Textiles)": 1,
+            "Calidad": 1,
+            "Maderas Útiles": -1,
+            "Carne": -1,
+            "Cualquier piel": -1,
+            "Cualquier Textil": -1,
+            "Producción Agrícola": 1,
+            "Defensa (tus Regimientos)": 1
+        },
+        icono: "🌿",
+        descripcion: "Guardianes druídicos protegen la naturaleza"
+    },
+    "Animales Inquietos": {
+        efectos: {
+            "Mantenimiento": 1,
+            "Calidad": -1,
+            "Coste de Movilidad (otros Regimientos)": 1,
+            "Detección": 1
+        },
+        icono: "🐺",
+        descripcion: "Fauna agitada y territorial"
+    },
+    "Terreno Inestable": {
+        efectos: {
+            "Coste de Construcción (Maderas, Marfiles, Pieles)": 2,
+            "Coste de Movilidad": 1
+        },
+        icono: "🌋",
+        descripcion: "Suelo propenso a movimientos y grietas"
+    },
+    "Bandidos Activos": {
+        efectos: {
+            "Calidad": -2,
+            "Defensa (tus Regimientos)": 1,
+            "Defensa (En Asedios)": 1
+        },
+        icono: "🗡️",
+        descripcion: "Grupos de forajidos operan en la zona"
+    },
+    "Agudeza Mágica": {
+        efectos: {
+            "Detección": -1
+        },
+        icono: "🔮",
+        descripcion: "La magia fluye con mayor intensidad"
+    },
+    "Culto Yuan-Ti": {
+        efectos: {
+            "Inmigración (Especies Neutrales)": -5,
+            "Inmigración (Monstruos)": 5,
+            "Inmigración (Especies Negativas)": 5,
+            "Consumo de Suministros Militares": 1
+        },
+        icono: "🐍",
+        descripcion: "Adoradores serpentinos realizan rituales"
+    },
+    "Terreno Ponzoñoso": {
+        efectos: {
+            "Coste de Movilidad": 2,
+            "Consumo de Suministros Militares": 1,
+            "Consumo de Suministros Militares (otros Regimientos)": 1
+        },
+        icono: "☠️",
+        descripcion: "Toxinas naturales impregnan el ambiente"
+    },
+    "Elementales Manifiestos": {
+        efectos: {
+            "Mantenimiento": 1,
+            "Producción de Artilugios Mágicos": 1
+        },
+        icono: "🌪️",
+        descripcion: "Espíritus elementales habitan la zona"
+    },
+    "Salpicado": {
+        efectos: {
+            "Calidad": 1,
+            "Coste de construcción (Todos los recursos)": 1,
+            "Mantenimiento": -1,
+            "Inmigración": 5
+        },
+        icono: "🏝️",
+        descripcion: "Terreno fragmentado con muchas islas o zonas"
+    },
+    "Presencia Naga": {
+        efectos: {
+            "Coste de construcción (Todos los recursos)": 1,
+            "Cualquier Pesca": 1,
+            "Producción de Artilugios Mágicos": 1,
+            "Capacidad Mágica": -1,
+            "Inmigración": -5
+        },
+        icono: "🐉",
+        descripcion: "Nagas ancestrales dominan estas aguas"
+    }
+};
+
+// =====================================================
+// LISTA COMPLETA DE RECURSOS CON CATEGORÍAS
+// =====================================================
+const RECURSOS = {
+    // Materias Primas - Maderas
+    "Madera Útil": { categoria: "Materia Prima", tags: ["Madera"], icono: "🪵" },
+    "Maderas Preciosas": { categoria: "Materia Prima Exótica", tags: ["Madera", "Exotico"], icono: "🌳" },
+
+    // Alimentos
+    "Alimento": { categoria: "Alimento", tags: ["Alimento"], icono: "🥩" },
+    "Tubérculos": { categoria: "Alimento", tags: ["Alimento"], icono: "🥔" },
+    "Frutos": { categoria: "Alimento", tags: ["Alimento"], icono: "🍓" },
+    "Carne": { categoria: "Alimento", tags: ["Alimento"], icono: "🥩" },
+    "Pesca": { categoria: "Alimento", tags: ["Alimento"], icono: "🐟" },
+    "Pesca Exótica": { categoria: "Alimento Exótico", tags: ["Alimento", "Exotico"], icono: "🦑" },
+    "Mantecas": { categoria: "Alimento", tags: ["Alimento"], icono: "🧈" },
+
+    // Pieles
+    "Pieles": { categoria: "Materia Prima", tags: ["Piel"], icono: "🦊" },
+    "Pieles Exóticas": { categoria: "Materia Prima Exótica", tags: ["Piel", "Exotico"], icono: "🐆" },
+
+    // Textiles y Fibras
+    "Fibras Útiles": { categoria: "Materia Prima", tags: ["Fibra", "Textil"], icono: "🧶" },
+    "Textiles": { categoria: "Materia Prima", tags: ["Textil"], icono: "🧵" },
+    "Textiles Mágicos": { categoria: "Recurso Mágico", tags: ["Textil", "Fibra", "Exotico", "Magico"], icono: "✨" },
+
+    // Minerales y Rocas
+    "Roca": { categoria: "Materia Prima", tags: ["Roca"], icono: "🪨" },
+    "Sal": { categoria: "Materia Prima", tags: ["Sal"], icono: "🧂" },
+    "Carbón": { categoria: "Materia Prima", tags: ["Carbon"], icono: "⚫" },
+    "Metales": { categoria: "Materia Prima", tags: ["Metal"], icono: "⛏️" },
+    "Metales Preciosos": { categoria: "Materia Prima Exótica", tags: ["Metal", "Exotico"], icono: "🥇" },
+    "Joyas": { categoria: "Materia Prima Exótica", tags: ["Joya", "Exotico"], icono: "💎" },
+    "Cristales Mágicos": { categoria: "Recurso Mágico", tags: ["Cristal", "Magico", "Exotico"], icono: "🔮" },
+
+    // Otros
+    "Tintes": { categoria: "Materia Prima", tags: ["Tinte"], icono: "🎨" },
+    "Caucho": { categoria: "Materia Prima", tags: ["Caucho"], icono: "⚫" },
+    "Marfiles": { categoria: "Materia Prima Exótica", tags: ["Marfil", "Exotico"], icono: "🦴" },
+    "Guano": { categoria: "Materia Prima", tags: ["Guano"], icono: "💩" },
+    "Reliquias": { categoria: "Recurso Mágico", tags: ["Reliquia", "Magico"], icono: "📿" },
+    "Especias Exóticas": { categoria: "Recurso Exótico", tags: ["Especia", "Exotico"], icono: "🌶️" },
+
+    // Energía
+    "Fuente de Energía": { categoria: "Recurso Energético", tags: ["Energia"], icono: "⚡" },
+    "Fuente de Energía Natural": { categoria: "Recurso Energético", tags: ["Energia"], icono: "🌿" },
+    "Fuente de Energía Positiva": { categoria: "Recurso Energético", tags: ["Energia"], icono: "☀️" },
+    "Fuente de Energía Negativa": { categoria: "Recurso Energético", tags: ["Energia"], icono: "🌑" },
+    "Fuente de Energía Salvaje": { categoria: "Recurso Energético", tags: ["Energia"], icono: "🌀" },
+
+    // Recursos Procesados / Manufacturas
+    "Muebles": { categoria: "Procesado", tags: ["Mueble"], icono: "🪑" },
+    "Herramientas": { categoria: "Procesado", tags: ["Herramienta"], icono: "🔧" },
+    "Papiro": { categoria: "Procesado", tags: ["Papiro"], icono: "📜" },
+    "Acero": { categoria: "Procesado", tags: ["Acero", "Metal"], icono: "🔩" },
+    "Cristaleria": { categoria: "Procesado", tags: ["Cristal"], icono: "🥂" },
+    "Explosivos": { categoria: "Procesado", tags: ["Explosivo"], icono: "🧨" },
+    "Maquinaria": { categoria: "Procesado", tags: ["Maquinaria"], icono: "⚙️" },
+    "Piel Procesada": { categoria: "Procesado", tags: ["Piel", "Procesado"], icono: "🧥" }, // Assuming refined leather
+    "Suministros": { categoria: "Procesado", tags: ["Suministro"], icono: "📦" },
+    "Combustible": { categoria: "Procesado", tags: ["Combustible"], icono: "⛽" },
+    "Fertilizante": { categoria: "Procesado", tags: ["Fertilizante"], icono: "🧪" }
+};
+
+// =====================================================
+// EDIFICIOS
+// =====================================================
+const EDIFICIOS_INICIALES = [
+    "Cultivo Agrícola",
+    "Zona Residencial (1)",
+    "Cuartel",
+    "Almacén (1)",
+    "Manufactura (1)",
+    "Archivo",
+    "Mercado",
+    "Ala Festiva"
+];
+
+// =====================================================
+// RECURSOS ESPECIALES (No ocupan almacenamiento)
+// =====================================================
+const RECURSOS_ESPECIALES = {
+    "Ideas": { icono: "💡", descripcion: "Puntos de investigación", ocupaAlmacen: false },
+    "Influencia": { icono: "🏛️", descripcion: "Poder político", ocupaAlmacen: false }
+};
+
+// EDIFICIOS v5 - Sistema de Costes con Opciones
+// Cada edificio tiene costesG1 (array de opciones) y costesMejora (para subir grado)
+// El jugador elige UNA opción de coste para construir
+// =====================================================
+const EDIFICIOS = {
+    // === ADMINISTRACIÓN ===
+    "Oficina Coordinación": {
+        tipo: "Admin", icono: "📋", maxGrado: 3,
+        costesG1: [
+            { "Madera": 8, "Papiro": 2 },
+            { "Metal": 3, "Papiro": 2 },
+            { "Roca": 4, "Papiro": 2 },
+            { "Doblones": 25 }
+        ],
+        costesMejora: [
+            { "Madera": 3, "Papiro": 1 },
+            { "Metal": 2, "Papiro": 1 },
+            { "Roca": 3, "Papiro": 1 },
+            { "Doblones": 12 }
+        ],
+        capacidad: { base: 1, porGrado: 1, rol: "Académico" }, // 1 Académico (+1 por Grado)
+        produccionTrabajo: { tipo: "Regional", cantidad: 1 },
+        descripcion: "Coordina la región. +1 Producción del Recurso Regional elegido."
+    },
+    "Alcaldía": {
+        tipo: "Admin", icono: "🏛️", maxGrado: 1,
+        costesG1: [
+            { "Madera Útil": 6 },
+            { "Marfil": 2, "Piel": 3 },
+            { "Roca": 5 },
+            { "Metal": 4 },
+            { "Doblones": 12 }
+        ],
+        descripcion: "Mejora a Poblado. Calidad +2.",
+        efectos: { "Calidad": 2 },
+        effect: "Habilita Grado Poblado"
+    },
+    "Palacio": {
+        tipo: "Admin", icono: "🏰", maxGrado: 1,
+        costesG1: [
+            { "Madera Útil": 12 },
+            { "Marfil": 4, "Piel": 6 },
+            { "Roca": 10 },
+            { "Metal": 8 },
+            { "Doblones": 24 }
+        ],
+        descripcion: "Mejora a Urbe.",
+        effect: "Habilita Grado Urbe"
+    },
+    "Ala Concejal": {
+        tipo: "Admin", icono: "⚖️", maxGrado: 1,
+        costesG1: [
+            { "Madera Útil": 28 },
+            { "Marfil": 9, "Piel": 14 },
+            { "Roca": 23 },
+            { "Metal": 19 },
+            { "Doblones": 60 }
+        ],
+        descripcion: "Mejora a Megalópolis.",
+        effect: "Habilita Grado Megalópolis"
+    },
+    "Jurisprudencia ICS": {
+        tipo: "Admin", icono: "📜", maxGrado: 1,
+        costesG1: [
+            { "Doblones": 2, "Fibra Útil": 2 },
+            { "Doblones": 5 }
+        ],
+        descripcion: "Produce +1 Influencia (Pasivo).",
+        produccionPasiva: { "Influencia": 1 }
+    },
+
+    // === PRODUCCIÓN ===
+    "Cultivo Agrícola": {
+        tipo: "Prod.", icono: "🌾", maxGrado: 1,
+        costesG1: [
+            { "Madera Útil": 2 },
+            { "Marfil": 1 },
+            { "Doblones": 4 }
+        ],
+        capacidad: { base: 3, rol: "Cualquiera" },
+        produccionTrabajo: { recurso: "Alimento", cantidad: 2 },
+        descripcion: "+2 Alimentos por Cuota asignada."
+    },
+    "Manufactura": {
+        tipo: "Prod.", icono: "🏭", maxGrado: 4,
+        costesG1: [
+            { "Madera": 5 },
+            { "Metal": 3 },
+            { "Roca": 4 },
+            { "Doblones": 11 }
+        ],
+        costesMejora: [
+            { "Madera": 2 },
+            { "Metal": 1 },
+            { "Roca": 2 },
+            { "Doblones": 5 }
+        ],
+        capacidad: { base: 4, porGrado: 4, rol: "Cualquiera" }, // 4 Cuotas Pob. (Por Grado) -> Base 4 at G1? Or 4 per grade implies 4*Grade. Assuming Base 4, +4 per Upgrade (G2=8).
+        produccionTrabajo: { tipo: "Procesado", cantidad: 1 },
+        permiteManufactura: true,
+        descripcion: "+1 Recurso Procesado (del tipo elegido) por Cuota."
+    },
+    "Molinar": {
+        tipo: "Prod.", icono: "🌬️", maxGrado: 1,
+        costesG1: [
+            { "Madera": 7, "Fibra": 1 },
+            { "Roca": 6, "Fibra": 1 },
+            { "Doblones": 17 }
+        ],
+        descripcion: "Aumenta producción Agrícola +1 (Pasivo).",
+        efectos: { "Bono_Agricola": 1 }
+    },
+    "Mina": {
+        tipo: "Prod.", icono: "⛏️", maxGrado: 1,
+        costesG1: [
+            { "Explosivos": 1 },
+            { "Doblones": 8 }
+        ],
+        descripcion: "Aumenta prod. Metales (Pasivo Regional).",
+        efectos: { "Bono_Metales": 1 }
+    },
+    "Forja": {
+        tipo: "Prod.", icono: "🔥", maxGrado: 3,
+        costesG1: [
+            { "Metal": 12, "Herramienta": 2 },
+            { "Roca": 15, "Herramienta": 2 },
+            { "Doblones": 44 }
+        ],
+        costesMejora: [
+            { "Metal": 1, "Herramienta": 1 },
+            { "Roca": 2, "Herramienta": 1 },
+            { "Doblones": 6 }
+        ],
+        capacidad: { base: 2, rol: "Artesano" },
+        produccionTrabajo: { recurso: "Acero", cantidad: 2 }, // G1: +2 Aceros. Upgrades change this to "Aceros Preciosos". Logic will handle this.
+        permiteManufactura: true,
+        descripcion: "G1: +2 Aceros. +Grado: +2 Aceros Preciosos."
+    },
+    "Taller": {
+        tipo: "Prod.", icono: "🔧", maxGrado: 1,
+        costesG1: [
+            { "Madera Útil": 4 },
+            { "Roca": 3 },
+            { "Metal": 2 },
+            { "Doblones": 9 }
+        ],
+        descripcion: "Efecto Pasivo: Tus Artesanos producen +1 Arma o Herramienta.",
+        efectos: { "Bono_Artesanos_Tools": 1 }
+    },
+    "Taller Ingeniería": {
+        tipo: "Prod.", icono: "🚜", maxGrado: 1,
+        costesG1: [
+            { "Acero": 20, "Maquinaria": 2 },
+            { "Roca": 160, "Maquinaria": 2 },
+            { "Madera": 190, "Maquinaria": 2 },
+            { "Doblones": 400 }
+        ],
+        descripcion: "Efecto Pasivo: Tus Artesanos producen +1 a todo Recurso Procesado.",
+        efectos: { "Bono_Artesanos_All": 1 }
+    },
+
+    // === ECONOMÍA ===
+    "Mercado": {
+        tipo: "Econ.", icono: "🏪", maxGrado: 1,
+        costesG1: [
+            { "Madera Útil": 3 },
+            { "Marfil": 1, "Piel": 2 },
+            { "Roca": 3 },
+            { "Doblones": 7 }
+        ],
+        capacidad: { base: 3, rol: "Artesano" },
+        produccionTrabajo: { recurso: "Doblones", cantidad: 1, condicion: "per_5_pop" }, // +1 Medida de Doblón por cada 5 Cuotas de Población totales.
+        descripcion: "+1 Medida de Doblón por cada 5 Cuotas de Población totales."
+    },
+    "Caraversai": {
+        tipo: "Econ.", icono: "🐪", maxGrado: 1,
+        costesG1: [
+            { "Alimento": 30 },
+            { "Doblones": 45 }
+        ],
+        capacidad: { base: 1, rol: "Artesano" },
+        descripcion: "+1 Medida Doblón por cada otro Poblado en Contacto."
+    },
+    "Casa Moneda": {
+        tipo: "Econ.", icono: "💰", maxGrado: 1,
+        costesG1: [
+            { "Acero": 20, "Papiro": 10 },
+            { "Roca": 160, "Papiro": 10 },
+            { "Doblones": 350 }
+        ],
+        capacidad: { base: 1, rol: "Académico" },
+        descripcion: "+1 Cuota Doblón por cada 10 Cuotas de Población."
+    },
+
+    // === MILITAR ===
+    "Cuartel": {
+        tipo: "Militar", icono: "⚔️", maxGrado: 1,
+        costesG1: [
+            { "Madera Útil": 3 },
+            { "Marfil": 1, "Piel": 2 },
+            { "Roca": 3 },
+            { "Metal": 2 },
+            { "Doblones": 7 }
+        ],
+        capacidad: { base: 3, rol: "Plebeyo" },
+        produccionTrabajo: { tipo: "Transformacion", output: "Soldados", cantidad: 20 },
+        descripcion: "Transformación: Convierte la Cuota en 20 Medidas de Soldados."
+    },
+    "Barracas": {
+        tipo: "Militar", icono: "🛌", maxGrado: 3,
+        costesG1: [
+            { "Madera": 8 },
+            { "Marfil": 3, "Piel": 4 },
+            { "Metal": 5 },
+            { "Roca": 7 },
+            { "Doblones": 17 }
+        ],
+        costesMejora: [
+            { "Madera": 2 },
+            { "Marfil": 1, "Piel": 1 },
+            { "Metal": 1 },
+            { "Roca": 2 },
+            { "Doblones": 5 }
+        ],
+        efectos: { "Guarnicion": 5, "Estructura": 20 },
+        descripcion: "Guarnición +5. Estructura +20."
+    },
+    "Centro Adiestramiento": {
+        tipo: "Militar", icono: "🎯", maxGrado: 1,
+        costesG1: [
+            { "Acero": 20, "Maquinaria": 2 },
+            { "Roca": 160, "Maquinaria": 2 },
+            { "Doblones": 396 }
+        ],
+        efectos: { "Guarnicion": 10 },
+        descripcion: "Guarnición +10. Descuento tropas."
+    },
+    "Bastión": {
+        tipo: "Militar", icono: "🏯", maxGrado: 1,
+        costesG1: [
+            { "Roca": 20 },
+            { "Metal": 16 },
+            { "Doblones": 52 }
+        ],
+        efectos: { "Asedio": 2 },
+        descripcion: "Ataque/Defensa Asedios +2."
+    },
+    "Baluarte": {
+        tipo: "Militar", icono: "🏰", maxGrado: 1,
+        costesG1: [
+            { "Acero": 41 },
+            { "Roca": 250 },
+            { "Doblones": 650 }
+        ],
+        efectos: { "Asedio": 2, "Estructura": 30 },
+        descripcion: "Ataque/Defensa Asedios +2. Estructura +30."
+    },
+    "Alambrados": {
+        tipo: "Militar", icono: "🚧", maxGrado: 1,
+        costesG1: [
+            { "Acero": 15 },
+            { "Doblones": 233 }
+        ],
+        efectos: { "Calidad": 4 },
+        descripcion: "Calidad +4. Mejora producción pasiva."
+    },
+    "Muros": {
+        tipo: "Defensa", icono: "🧱", maxGrado: 5,
+        costesG1: [
+            { "Madera": 14 },
+            { "Metal": 4, "Roca": 9 },
+            { "Metal": 10 },
+            { "Roca": 11 },
+            { "Doblones": 30 }
+        ],
+        costesMejora: [
+            { "Madera": 2 },
+            { "Piel": 1 },
+            { "Metal": 1 },
+            { "Roca": 2 },
+            { "Doblones": 4 }
+        ],
+        efectos: { "Defensa": 1, "Estructura": 20 },
+        descripcion: "Defensa +1. Estructura +20."
+    },
+    "Vigía": {
+        tipo: "Defensa", icono: "🔭", maxGrado: 4,
+        costesG1: [
+            { "Madera Útil": 3 },
+            { "Metal": 2 },
+            { "Roca": 3 },
+            { "Doblones": 7 }
+        ],
+        costesMejora: [
+            { "Madera": 2 },
+            { "Metal": 1 },
+            { "Roca": 2 },
+            { "Doblones": 4 }
+        ],
+        efectos: { "Deteccion": 2 },
+        descripcion: "Detección +2 (+2/Grado)."
+    },
+
+    // === CONOCIMIENTO ===
+    "Academia": {
+        tipo: "Conoc.", icono: "🎓", maxGrado: 1,
+        costesG1: [
+            { "Madera Útil": 7 },
+            { "Marfil": 2, "Piel": 4 },
+            { "Roca": 6 },
+            { "Metal": 5 },
+            { "Doblones": 15 }
+        ],
+        capacidad: { base: 3, rol: "Cualquiera" },
+        produccionTrabajo: { tipo: "Transformacion", options: ["Soldados", "Arcanistas", "Clero"] },
+        descripcion: "Transformación: Convierte la Cuota en Soldados, Arcanistas o Clero."
+    },
+    "Escuela": {
+        tipo: "Conoc.", icono: "🏫", maxGrado: 2,
+        costesG1: [
+            { "Madera": 11, "Mueble": 1 },
+            { "Marfil": 4, "Piel": 6, "Mueble": 1 },
+            { "Roca": 9, "Mueble": 1 },
+            { "Doblones": 38 }
+        ],
+        costesMejora: [
+            { "Madera": 2, "Mueble": 1 },
+            { "Marfil": 1, "Mueble": 1 },
+            { "Roca": 2, "Mueble": 1 },
+            { "Doblones": 13 }
+        ],
+        capacidad: { base: 2, porGrado: 2, rol: "Plebeyo" },
+        produccionTrabajo: { tipo: "Transformacion", output: "Artesanos" },
+        descripcion: "Transformación: Convierte Plebeyos en Artesanos."
+    },
+    "Gremio Intelectuales": {
+        tipo: "Conoc.", icono: "🧠", maxGrado: 1,
+        costesG1: [
+            { "Papiro": 2, "Influencia": 1 },
+            { "Doblones": 12 }
+        ],
+        costesMejora: [
+            { "Metal": 1, "Herramienta": 1 },
+            { "Roca": 2, "Herramienta": 1 },
+            { "Doblones": 6 }
+        ],
+        capacidad: { base: 3, rol: "Académico" },
+        produccionTrabajo: { recurso: "Ideas", cantidad: 1 },
+        descripcion: "+1 Ideas. (Pasivo: Produce Aceros por Grado)."
+    },
+    "Universidad": {
+        tipo: "Conoc.", icono: "🏛️", maxGrado: 3,
+        costesG1: [
+            { "Madera": 250, "Mueble": 5 },
+            { "Roca": 208, "Mueble": 5 },
+            { "Doblones": 565 }
+        ],
+        costesMejora: [
+            { "Madera": 20, "Mueble": 2 },
+            { "Roca": 17, "Mueble": 2 },
+            { "Doblones": 53 }
+        ],
+        capacidad: { base: 6, rol: "Mix_Acad_Pob" },
+        descripcion: "Académicos: +3 Ideas. Población: Se convierte en Académicos."
+    },
+    "Archivo": {
+        tipo: "Conoc.", icono: "📚", maxGrado: 1,
+        costesG1: [
+            { "Madera": 3, "Fibra": 1 },
+            { "Roca": 3, "Fibra": 1 },
+            { "Doblones": 9 }
+        ],
+        efectos: { "CapacidadAdmin": 20 },
+        descripcion: "Capacidad Administrativa +20."
+    },
+
+    // === VIVIENDA ===
+    "Zona Residencial": {
+        tipo: "Vivienda", icono: "🏠", maxGrado: 3,
+        costesG1: [
+            { "Madera Útil": 3 },
+            { "Marfil": 1, "Piel": 2 },
+            { "Roca": 3 },
+            { "Doblones": 7 }
+        ],
+        costesMejora: [
+            { "Madera Útil": 3 },
+            { "Marfil": 1, "Piel": 2 },
+            { "Roca": 3 },
+            { "Doblones": 7 }
+        ],
+        descripcion: "Calidad +2 (+1/Grado)."
+    },
+
+    // === LOGÍSTICA ===
+    "Almacén": {
+        tipo: "Logística", icono: "📦", maxGrado: 4,
+        costesG1: [
+            { "Madera": 4 },
+            { "Marfil": 1, "Piel": 3 },
+            { "Doblones": 9 }
+        ],
+        costesMejora: [
+            { "Madera": 2 },
+            { "Marfil": 1, "Piel": 1 },
+            { "Doblones": 5 }
+        ],
+        descripcion: "Capacidad Almacenamiento +10 Cuotas/Grado."
+    },
+    "Caminos": {
+        tipo: "Infra", icono: "🛣️", maxGrado: 3,
+        costesG1: [
+            { "Doblones": 1 }
+        ],
+        costesMejora: [
+            { "Roca": 1 },
+            { "Doblones": 2 }
+        ],
+        descripcion: "Movilidad +1 (+1/Grado)."
+    },
+
+    // === NAVAL ===
+    "Bahía": {
+        tipo: "Naval", icono: "⚓", maxGrado: 1,
+        costesG1: [
+            { "Madera Útil": 3 },
+            { "Doblones": 7 }
+        ],
+        descripcion: "Habilita Navíos. +1 Pesca."
+    },
+    "Puerto": {
+        tipo: "Naval", icono: "🚢", maxGrado: 1,
+        costesG1: [
+            { "Roca": 10, "Metal": 4 },
+            { "Madera": 12, "Metal": 4 },
+            { "Doblones": 39 }
+        ],
+        descripcion: "Contacto costero. +1 Pesca."
+    },
+
+    // === MAGIA ===
+    "Salón Hechicería": {
+        tipo: "Magia", icono: "🔮", maxGrado: 1,
+        costesG1: [
+            { "Doblones": 2, "Fibra": 2 },
+            { "Doblones": 5 }
+        ],
+        descripcion: "Habilita Hechicería."
+    },
+    "Torre Hechicería": {
+        tipo: "Magia", icono: "🧙‍♂️", maxGrado: 1,
+        costesG1: [
+            { "Roca": 10, "Cristal": 2 },
+            { "Madera": 12, "Cristal": 2 },
+            { "Doblones": 35 }
+        ],
+        capacidad: { base: 2, rol: "Mix_Arc_Pob" },
+        descripcion: "Arcanista: +1 Cap. Mágica. Pob: Convierte en Arcanista."
+    },
+    "Terraza Archimagos": {
+        tipo: "Magia", icono: "✨", maxGrado: 1,
+        costesG1: [
+            { "Roca": 75, "Cristal Mágico": 10 },
+            { "Doblones": 403 }
+        ],
+        capacidad: { base: 5, rol: "Mix_Arc_Art" },
+        descripcion: "Ambos: +3 Artilugios Mágicos."
+    },
+
+    // === RELIGIÓN ===
+    "Plaza Adoración": {
+        tipo: "Religión", icono: "🛐", maxGrado: 1,
+        costesG1: [
+            { "Doblones": 5 }
+        ],
+        descripcion: "Habilita Devoción."
+    },
+    "Sitio Sagrado": {
+        tipo: "Religión", icono: "⛩️", maxGrado: 1,
+        costesG1: [
+            { "Madera Útil": 6 },
+            { "Marfil": 2, "Piel": 3 },
+            { "Roca": 5 },
+            { "Doblones": 13 }
+        ],
+        capacidad: { base: 3, rol: "Mix_Clero_Pob" },
+        descripcion: "Clero: +1 Devoción. Pob: Se convierte en Clero."
+    },
+    "Insigne": {
+        tipo: "Religión", icono: "⛪", maxGrado: 1,
+        costesG1: [
+            { "Roca": 160, "Textil Mágico": 10 },
+            { "Doblones": 380 }
+        ],
+        capacidad: { base: 4, rol: "Mix_Teo_Acad" },
+        descripcion: "Teólogo: +1 Ideas y Devoción. Académico: Se convierte en Teólogo."
+    },
+
+    // === ESPECIAL ===
+    "Generador": {
+        tipo: "Especial", icono: "⚡", maxGrado: 1,
+        costesG1: [
+            { "Roca": 10, "Metal": 4 },
+            { "Madera": 12, "Metal": 4 },
+            { "Doblones": 39 }
+        ],
+        capacidad: { base: 2, rol: "Mix_Carb_Ener" },
+        descripcion: "Consumo Carbón/Energía para potenciar producción."
+    },
+    "Antena Telúrica": {
+        tipo: "Especial", icono: "📡", maxGrado: 1,
+        costesG1: [
+            { "Cristal Mágico": 8 },
+            { "Doblones": 34 }
+        ],
+        descripcion: "Aumenta Grado Influencia Mágica."
+    },
+    "Ala Festiva": {
+        tipo: "Social", icono: "🎉", maxGrado: 5,
+        costesG1: [
+            { "Madera": 6 },
+            { "Marfil": 2, "Piel": 3 },
+            { "Metal": 4 },
+            { "Roca": 5 },
+            { "Doblones": 13 }
+        ],
+        costesMejora: [
+            { "Madera": 2 },
+            { "Piel": 1 },
+            { "Metal": 1 },
+            { "Roca": 2 },
+            { "Doblones": 4 }
+        ],
+        descripcion: "Calidad +3 (+3/Grado)."
+    }
+};
+
+
+// =====================================================
+// RECETAS DE MANUFACTURA
+// =====================================================
+const RECETAS_MANUFACTURA = {
+    "logistica_y_supervivencia": {
+        "suministros": { "edificio": "Manufactura", "input": { "Alimento": 20 }, "output": { "Recurso": "Suministros", "Cantidad": 10 }, "desc": "Sustento básico para expediciones." },
+        "fertilizante": {
+            "edificio": "Manufactura",
+            "opcion_a": { "input": { "Guano": 20 }, "output": { "Recurso": "Fertilizante", "Cantidad": 10 } },
+            "opcion_b": { "input": { "Carbon": 10, "Madera": 10 }, "output": { "Recurso": "Fertilizante", "Cantidad": 10 } }
+        },
+        "combustibles": {
+            "edificio": "Manufactura",
+            "opcion_a": { "input": { "Carbon": 30 }, "output": { "Recurso": "Combustible", "Cantidad": 10 } },
+            "opcion_b": { "input": { "Energia": 10 }, "output": { "Recurso": "Combustible", "Cantidad": 10 } }
+        }
+    },
+    "construccion_y_hogar": {
+        "muebles": { "input": { "Madera": 10, "Fibra": 10 }, "output": { "Recurso": "Muebles", "Cantidad": 10 } },
+        "muebles_de_lujo": { "input": { "Madera": 10, "Textil Magico": 20 }, "output": { "Recurso": "Muebles Lujo", "Cantidad": 10 } },
+        "herramientas_rudimentarias": { "input": { "Madera": 10 }, "output": { "Recurso": "Herramientas Rudimentarias", "Cantidad": 10 } },
+        "herramientas": { "input": { "Roca": 20 }, "output": { "Recurso": "Herramientas", "Cantidad": 10 } },
+        "cristaleria": { "input": { "Roca": 10 }, "output": { "Recurso": "Cristaleria", "Cantidad": 10 } }
+    },
+    "textiles_y_papeleria": {
+        "papiro": { "input": { "Fibra": 20 }, "output": { "Recurso": "Papiro", "Cantidad": 10 } },
+        "ropa": { "input": { "Textil": 20 }, "output": { "Recurso": "Ropa", "Cantidad": 10 } },
+        "ropa_de_lujo": {
+            "opcion_a": { "input": { "Textil Magico": 20 }, "output": { "Recurso": "Ropa Lujo", "Cantidad": 10 } },
+            "opcion_b": { "input": { "Piel Exotica": 20 }, "output": { "Recurso": "Ropa Lujo", "Cantidad": 10 } }
+        },
+        "libros": {
+            "opcion_a": { "input": { "Papiro": 10, "Fibra": 10 }, "output": { "Recurso": "Libros", "Cantidad": 10 } },
+            "opcion_b": { "input": { "Guano": 20 }, "output": { "Recurso": "Libros", "Cantidad": 10 } }
+        }
+    },
+    "metalurgia_avanzada": {
+        "acero": { "edificio": "Forja", "input": { "Metal": 20 }, "output": { "Recurso": "Acero", "Cantidad": 10 } },
+        "acero_precioso": { "edificio": "Forja", "input": { "Metal Precioso": 20 }, "output": { "Recurso": "Acero Precioso", "Cantidad": 10 } },
+        "orfebreria": { "edificio": "Forja", "input": { "Metal Precioso": 10, "Joyas": 10 }, "output": { "Recurso": "Orfebreria", "Cantidad": 10 } }
+    },
+    "quimica_y_tecnologia": {
+        "materiales_alquimicos": { "edificio": "Manufactura", "input": { "Carbon": 10, "Sal": 10, "Frutos": 10 }, "output": { "Recurso": "Materiales Alquimicos", "Cantidad": 10 } },
+        "explosivos": { "edificio": "Manufactura", "input": { "Materiales Alquimicos": 20, "Cristaleria": 10 }, "output": { "Recurso": "Explosivos", "Cantidad": 10 } },
+        "polvora": {
+            "edificio": "Manufactura",
+            "opcion_a": { "input": { "Carbon": 10, "Sal": 10 }, "output": { "Recurso": "Polvora", "Cantidad": 10 } },
+            "opcion_b": { "input": { "Fertilizante": 20 }, "output": { "Recurso": "Polvora", "Cantidad": 10 } }
+        },
+        "plasticos": { "edificio": "Manufactura", "input": { "Caucho": 20 }, "output": { "Recurso": "Plasticos", "Cantidad": 10 } },
+        "neumaticos": { "edificio": "Manufactura", "input": { "Plastico": 10, "Caucho": 20 }, "output": { "Recurso": "Neumaticos", "Cantidad": 10 } },
+        "maquinaria": { "edificio": "Manufactura", "input": { "Acero": 20, "Metal": 20, "Caucho": 10, "Plastico": 20 }, "output": { "Recurso": "Maquinaria", "Cantidad": 10 } }
+    },
+    "armamento_y_defensa": {
+        "armas_rudimentarias": { "edificio": "Forja", "input": { "Madera": 10 }, "output": { "Recurso": "Armas Rudimentarias", "Cantidad": 10 } },
+        "armas": { "edificio": "Forja", "input": { "Metal": 20 }, "output": { "Recurso": "Armas", "Cantidad": 10 } },
+        "armas_excelsas": { "edificio": "Forja", "input": { "Acero": 20 }, "output": { "Recurso": "Armas Excelsas", "Cantidad": 10 } },
+        "armas_de_fuego": { "edificio": "Forja", "input": { "Acero": 10, "Polvora": 10 }, "output": { "Recurso": "Armas Fuego", "Cantidad": 10 } },
+        "armaduras_excelsas": { "edificio": "Forja", "input": { "Acero": 30 }, "output": { "Recurso": "Armaduras Excelsas", "Cantidad": 10 } },
+        "material_balistico": { "edificio": "Forja", "input": { "Explosivos": 30 }, "output": { "Recurso": "Material Balistico", "Cantidad": 10 } },
+        "canon_clasico": { "edificio": "Forja", "input": { "Acero": 20, "Polvora": 10 }, "output": { "Recurso": "Canon Clasico", "Cantidad": 10 } },
+        "canon_balistico": { "edificio": "Forja", "input": { "Acero": 30, "Material Balistico": 10 }, "output": { "Recurso": "Canon Balistico", "Cantidad": 10 } }
+    },
+    "vehiculos": {
+        "carruajes": { "edificio": "Manufactura", "input": { "Madera": 40, "Metal": 10 }, "output": { "Recurso": "Carruajes", "Cantidad": 10 } }
+    }
+};
+
+// =====================================================
+// GRADOS DE ASENTAMIENTO
+// =====================================================
+const GRADOS = {
+    "Estamento": {
+        nivel: 1,
+        calidad: 1,
+        admin: 15,
+        guarnicion: 5,
+        almacenamiento: 20,
+        inmigracion: 10,
+        icono: "🏕️",
+        descripcion: "Campamento básico"
+    },
+    "Poblado": {
+        nivel: 2,
+        calidad: 3,
+        admin: 25,
+        guarnicion: 10,
+        almacenamiento: 30,
+        inmigracion: 15,
+        icono: "🏘️",
+        descripcion: "Pequeña comunidad establecida"
+    },
+    "Urbe": {
+        nivel: 3,
+        calidad: 5,
+        admin: 40,
+        guarnicion: 25,
+        almacenamiento: 40,
+        inmigracion: 10,
+        icono: "🏛️",
+        descripcion: "Ciudad próspera"
+    },
+    "Megalópolis": {
+        nivel: 4,
+        calidad: 15,
+        admin: 300,
+        guarnicion: 80,
+        almacenamiento: 120,
+        inmigracion: 20,
+        icono: "🏰",
+        descripcion: "Gran metrópolis"
+    }
+};
+
+// =====================================================
+// TRIBUTOS
+// =====================================================
+const TRIBUTOS = {
+    "Sin Tributo": { doblones: 0, calidad: 1, icono: "😊" },
+    "Tributo Sencillo": { doblones: 1, calidad: -1, icono: "😐" },
+    "Tributo Elevado": { doblones: 2, calidad: -3, icono: "😟" },
+    "Tributo Exigente": { doblones: 3, calidad: -5, icono: "😰" }
+};
+
+// =====================================================
+// INFLUENCIA MÁGICA
+// =====================================================
+const INFLUENCIA_MAGICA = {
+    "Baja": { valor: 0, icono: "🔵", descripcion: "Poca actividad mágica" },
+    "Media": { valor: 1, icono: "🟣", descripcion: "Actividad mágica moderada" },
+    "Alta": { valor: 2, icono: "🔴", descripcion: "Intensa actividad mágica" }
+};
+
+// =====================================================
+// FUNCIONES DE DADOS
+// =====================================================
+
+/**
+ * Lanza un dado y retorna el resultado
+ * @param {string} tipo - "d4", "d6", "d8", "d10", "d12", "2d6"
+ * @returns {number}
+ */
+function lanzarDado(tipo) {
+    if (tipo === "2d6") {
+        return Math.floor(Math.random() * 6) + 1 + Math.floor(Math.random() * 6) + 1;
+    }
+    const max = parseInt(tipo.replace('d', ''), 10);
+    return Math.floor(Math.random() * max) + 1;
+}
+
+/**
+ * Determina el tipo de bioma basado en tirada d12
+ * @returns {object} { esBiomaEspecial, biomaEspecial, necesitaSubBioma, tiradaD12 }
+ */
+function determinarTipoBioma() {
+    const tirada = lanzarDado("d12");
+
+    // Biomas normales: 1-6
+    if (tirada <= 6) {
+        const biomasArray = Object.keys(BIOMAS_BASE);
+        return {
+            esBiomaEspecial: false,
+            biomaBase: biomasArray[tirada - 1],
+            biomaEspecial: null,
+            necesitaSubBioma: false,
+            tiradaD12: tirada
+        };
+    }
+
+    // Biomas especiales: 7-11
+    let biomaEspecial = null;
+    for (const [nombre, data] of Object.entries(BIOMAS_ESPECIALES)) {
+        if (data.idRango.includes(tirada)) {
+            biomaEspecial = nombre;
+            break;
+        }
+    }
+
+    // 12 = repetir tirada
+    if (tirada === 12) {
+        return determinarTipoBioma(); // Recursivo
+    }
+
+    return {
+        esBiomaEspecial: true,
+        biomaBase: null,
+        biomaEspecial: biomaEspecial,
+        necesitaSubBioma: true,
+        tiradaD12: tirada
+    };
+}
+
+/**
+ * Determina el sub-bioma con d6
+ * @returns {object} { subBioma, tiradaD6 }
+ */
+function determinarSubBioma() {
+    const tirada = lanzarDado("d6");
+    const biomasArray = Object.keys(BIOMAS_BASE);
+    return {
+        subBioma: biomasArray[tirada - 1],
+        tiradaD6: tirada
+    };
+}
+
+/**
+ * Fusiona un bioma especial con su sub-bioma
+ * @param {string} biomaEspecial - Nombre del bioma especial
+ * @param {string} subBioma - Nombre del sub-bioma
+ * @returns {object} Bioma fusionado
+ */
+function fusionarBiomas(biomaEspecial, subBioma) {
+    const especial = BIOMAS_ESPECIALES[biomaEspecial];
+    const base = BIOMAS_BASE[subBioma];
+
+    // Combinar propiedades (especial + base, sin duplicados)
+    const propiedadesCombinadas = [...new Set([
+        ...especial.propiedadesCapa,
+        ...base.propiedadesBase
+    ])];
+
+    // Recursos: base + garantizados del especial
+    const recursosCombinados = [...new Set([
+        ...base.recursos,
+        ...especial.recursosGarantizados
+    ])];
+
+    // Exóticos: base + garantizados del especial
+    const exoticosCombinados = [...new Set([
+        ...base.exoticos,
+        ...especial.exoticosGarantizados
+    ])];
+
+    // Determinar influencia mágica (la más alta)
+    const nivelesMagia = { "Baja": 0, "Media": 1, "Alta": 2 };
+    const nivelFinal = Math.max(
+        nivelesMagia[especial.influenciaMagica],
+        nivelesMagia[base.influenciaMagica]
+    );
+    const influenciaFinal = Object.keys(nivelesMagia).find(k => nivelesMagia[k] === nivelFinal);
+
+    return {
+        nombre: `${biomaEspecial} (${subBioma})`,
+        icono: especial.icono,
+        iconoSecundario: base.icono,
+        propiedades: propiedadesCombinadas,
+        recursos: recursosCombinados,
+        recursosGarantizados: especial.recursosGarantizados,
+        exoticos: exoticosCombinados,
+        exoticosGarantizados: especial.exoticosGarantizados,
+        dado: base.dado,
+        dadoExotico: base.dadoExotico,
+        peculiaridadFija: especial.peculiaridadFija,
+        dadoPeculiaridades: especial.dadoPeculiaridades,
+        influenciaMagica: influenciaFinal,
+        descripcion: `${especial.descripcion} sobre ${base.descripcion.toLowerCase()}`
+    };
+}
+
+/**
+ * Obtiene un recurso aleatorio de un bioma (REEMPLAZA el anterior)
+ * @param {string[]} recursos - Lista de recursos del bioma
+ * @param {string} dado - Tipo de dado
+ * @returns {object} { recurso, tirada, abundancia }
+ */
+function tirarRecurso(recursos, dado) {
+    const tirada = lanzarDado(dado);
+    const maxDado = parseInt(dado.replace('d', ''), 10);
+    const indice = Math.min(tirada - 1, recursos.length - 1);
+    const recurso = recursos[indice];
+
+    // Determinar abundancia basada en tirada (Invertido: bajos son comunes/abundantes, altos son raros/escasos)
+    let abundancia;
+    if (tirada <= Math.floor(maxDado * 0.2)) {
+        abundancia = "Abundante";
+    } else if (tirada >= Math.ceil(maxDado * 0.8)) {
+        abundancia = "Escaso";
+    } else {
+        abundancia = "Normal";
+    }
+
+    return {
+        recurso,
+        tirada,
+        dado,
+        abundancia
+    };
+}
+
+/**
+ * Calcula los modificadores de recursos basados en propiedades
+ * @param {string[]} propiedades - Propiedades seleccionadas
+ * @returns {object} Mapa de recurso -> modificador total
+ */
+function calcularModificadoresRecursos(propiedades) {
+    const modificadores = {};
+
+    propiedades.forEach(propNombre => {
+        const prop = PROPIEDADES[propNombre];
+        if (!prop || !prop.efectos) return;
+
+        Object.entries(prop.efectos).forEach(([stat, valor]) => {
+            // Solo aplicar a stats que son recursos
+            if (RECURSOS[stat]) {
+                modificadores[stat] = (modificadores[stat] || 0) + valor;
+            }
+            // Manejar "Cualquier X"
+            if (stat.startsWith("Cualquier")) {
+                const tipo = stat.replace("Cualquier ", "").toLowerCase();
+                Object.keys(RECURSOS).forEach(recurso => {
+                    if (recurso.toLowerCase().includes(tipo)) {
+                        modificadores[recurso] = (modificadores[recurso] || 0) + valor;
+                    }
+                });
+            }
+        });
+    });
+
+    return modificadores;
+}
+
+/**
+ * Convierte nivel de abundancia a modificador numérico
+ * @param {string} nivel - Nombre del nivel
+ * @returns {number}
+ */
+function obtenerModificadorAbundancia(nivel) {
+    return NIVELES_ABUNDANCIA[nivel]?.modificador ?? 0;
+}
+
+// Exportar para uso en otros módulos
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        PROPIEDADES, PECULIARIDADES, GRADOS, TRIBUTOS, RECURSOS,
+        BIOMAS_BASE, BIOMAS_ESPECIALES, NIVELES_ABUNDANCIA, INFLUENCIA_MAGICA,
+        STATS_INVERTIDAS, esStatInvertida, RECETAS_MANUFACTURA, EDIFICIOS, // Added exports
+        lanzarDado, determinarTipoBioma, determinarSubBioma, fusionarBiomas,
+        tirarRecurso, calcularModificadoresRecursos, obtenerModificadorAbundancia
+    };
+}

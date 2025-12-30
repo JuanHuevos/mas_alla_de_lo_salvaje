@@ -1,0 +1,132 @@
+{
+  "building_engine_v3": {
+    "core_definitions": {
+      "cuota_ciudadano": {
+        "definition": "Grupo de 20 colonos asignados a una función específica.",
+        "assignment_logic": "Un edificio puede 'Requerir' (coste fijo) o 'Asignar' (trabajo activo) cuotas.",
+        "active_extraction_bonus": "+2 medidas de producción si se asigna 1 cuota de ciudadano a la labor."
+      },
+      "building_logic": {
+        "multiplicity": {
+          "UNIQUE": "Solo se puede construir una vez por asentamiento. Se dispara si el requisito es 'No tener X'.",
+          "MULTIPLE": "Se pueden construir varias instancias para stackear beneficios (Ej: Zona Residencial)."
+        },
+        "upgrade_rules": "Coste = Base * Nivel. Tiempo = Fijo. Beneficio = Acumulativo."
+      }
+    },
+    "construction_registry": {
+      "tier_1_estamento": {
+        "requirements": "Grado 1",
+        "buildings": {
+          "alcaldia": {
+            "multiplicity": "UNIQUE",
+            "time": 2,
+            "costs": { "madera": 6, "piedra": 2, "roca": 5, "metales": 4, "doblones": 12 },
+            "citizen_requirement": "0",
+            "effect": "Trigger de ascenso a Grado 2."
+          },
+          "zona_residencial": {
+            "multiplicity": "MULTIPLE",
+            "time": 2,
+            "maintenance": 1,
+            "costs": { "madera": 3, "piedra": 1, "roca": 3, "doblones": 7 },
+            "citizen_effect": { "capacidad_vivienda_cuotas": 2 },
+            "effect": "Aumenta el límite de población controlable."
+          },
+          "mercado": {
+            "multiplicity": "UNIQUE",
+            "requirements": ["No tener Mercado"],
+            "time": 2,
+            "costs": { "madera": 3, "piedra": 1, "roca": 3, "doblones": 7 },
+            "citizen_requirement": "1 Cuota de Artesano (opcional para bonus)",
+            "effect": "Habilita comercio local y global."
+          },
+          "manufactura": {
+            "multiplicity": "MULTIPLE",
+            "time": 4,
+            "maintenance": 2,
+            "costs": { "madera": 5, "piedra": 3, "metales": 4, "doblones": 11 },
+            "citizen_requirement": "1 Cuota de Artesano (Obligatorio)",
+            "effect": "Transforma materias primas en recursos procesados."
+          },
+          "cultivo_agricola": {
+            "multiplicity": "MULTIPLE",
+            "time": 2,
+            "costs": { "madera": 2, "piedra": 1, "doblones": 4 },
+            "citizen_assignment": "1 Cuota de Plebeyo para +2 medidas alimento",
+            "effect": "Genera sustento para la población."
+          }
+        }
+      },
+      "tier_2_poblado": {
+        "requirements": "Grado 2 + Alcaldía",
+        "buildings": {
+          "oficina_coordinacion": {
+            "multiplicity": "MULTIPLE",
+            "limit": 3,
+            "requirements": ["Ser un Poblado", "No tener más de 3 Oficinas"],
+            "time": 2,
+            "maintenance": 1,
+            "costs": { "doblones": 5, "papiro": 2 },
+            "citizen_requirement": "1 Cuota de Ciudadano",
+            "effect": "Automatiza la recolección de un recurso regional."
+          },
+          "escuela": {
+            "multiplicity": "UNIQUE",
+            "requirements": ["Ser un Poblado"],
+            "time": 5,
+            "maintenance": 1,
+            "costs": { "madera": 11, "mueble": 1, "piedra": 4, "pieles": 6, "doblones": 38 },
+            "citizen_transformation": "Convierte Cuota Plebeyo -> Cuota Académico",
+            "effect": "+1 Idea/Turno."
+          },
+          "forja": {
+            "multiplicity": "MULTIPLE",
+            "requirements": ["Taller previo"],
+            "time": 5,
+            "maintenance": 1,
+            "costs": { "metales": 12, "herramientas": 2, "roca": 15, "doblones": 44 },
+            "citizen_requirement": "2 Cuotas de Artesano",
+            "effect": "+2 medidas de Acero/Turno."
+          },
+          "bahia": {
+            "multiplicity": "UNIQUE",
+            "requirements": ["Estar en la costa"],
+            "time": 2,
+            "costs": { "madera": 3, "doblones": 7 },
+            "citizen_assignment": "1 Cuota de Ciudadano para +1 Pesca",
+            "effect": "Habilita construcción de Navíos."
+          }
+        }
+      },
+      "tier_3_urbe": {
+        "requirements": "Grado 3 + Palacio",
+        "buildings": {
+          "casa_moneda": {
+            "multiplicity": "UNIQUE",
+            "requirements": ["Tener Oficina de Coordinación"],
+            "time": 8,
+            "maintenance": 2,
+            "costs": { "piel_procesada": 20, "papiro": 10, "roca": 160, "doblones": 350 },
+            "citizen_requirement": "1 Cuota de Académico",
+            "effect": "+1 Doblón por cada 10 cuotas de población total."
+          },
+          "baluarte": {
+            "multiplicity": "MULTIPLE",
+            "limit": 2,
+            "requirements": ["No tener más de 2 Baluartes"],
+            "time": 9,
+            "costs": { "acero": 41, "roca": 25, "doblones": 650 },
+            "citizen_requirement": "2 Cuotas de Soldado (Guarnición)",
+            "effect": "+2 Ataque/Defensa Asedio, +30 Estructura."
+          }
+        }
+      }
+    },
+    "automation_logic_for_ia": {
+      "multiplicity_check": "IF building.requirements CONTAINS 'No tener' THEN multiplicity = UNIQUE ELSE MULTIPLE",
+      "citizen_lock": "IF available_citizen_quotas < building.citizen_requirement THEN action = BLOCK_CONSTRUCTION",
+      "maintenance_priority": "Al inicio del turno, las Cuotas de Ciudadano asignadas a mantenimiento se restan de la población disponible para extracción activa."
+    }
+  }
+}

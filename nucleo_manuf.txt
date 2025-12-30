@@ -1,0 +1,75 @@
+{
+  "manufacture_engine": {
+    "logic_notes": {
+      "unit": "Todas las cantidades están expresadas en CUOTAS (1 Cuota = 10 Medidas).",
+      "requirement": "Para procesar estas recetas se requiere el edificio Manufactura o Forja y población de tipo Artesano.",
+      "processing_cost": "Cambiar el recurso producido en una Manufactura cuesta 5 Cuotas de Doblones."
+    },
+    "recipes": {
+      "logistica_y_supervivencia": {
+        "suministros": { "input": { "alimentos": 2 }, "output": 1, "desc": "Sustento básico para expediciones." },
+        "fertilizante": { 
+          "opcion_a": { "guano": 2 }, 
+          "opcion_b": { "carbon": 1, "madera_util": 1 }, 
+          "output": 1 
+        },
+        "combustibles": { 
+          "opcion_a": { "carbon": 3 }, 
+          "opcion_b": { "fuente_energia_natural": 1 }, 
+          "output": 1 
+        }
+      },
+      "construccion_y_hogar": {
+        "muebles": { "input": { "madera_util": 1, "fibra_util": 1 }, "output": 1 },
+        "muebles_de_lujo": { "input": { "madera_util": 1, "textil_magico": 2 }, "output": 1 },
+        "herramientas_rudimentarias": { "input": { "madera_util": 1 }, "output": 1 },
+        "herramientas": { "input": { "roca": 2 }, "output": 1 },
+        "cristaleria": { "input": { "roca": 1 }, "output": 1 }
+      },
+      "textiles_y_papeleria": {
+        "papiro": { "input": { "fibra_util": 2 }, "output": 1 },
+        "ropa": { "input": { "textil": 2 }, "output": 1 },
+        "ropa_de_lujo": { 
+          "opcion_a": { "textil_magico": 2 }, 
+          "opcion_b": { "piel_exotica": 2 }, 
+          "output": 1 
+        },
+        "libros": { 
+          "opcion_a": { "papiro": 1, "fibra_util": 1 }, 
+          "opcion_b": { "guano": 2 }, 
+          "output": 1 
+        }
+      },
+      "metalurgia_avanzada": {
+        "acero": { "input": { "metal": 2 }, "output": 1 },
+        "acero_precioso": { "input": { "metal_precioso": 2 }, "output": 1 },
+        "orfebreria": { "input": { "metal_precioso": 1, "joyas": 1 }, "output": 1 }
+      },
+      "quimica_y_tecnologia": {
+        "materiales_alquimicos": { "input": { "carbon": 1, "sal": 1, "frutos_tuberculos": 1 }, "output": 1 },
+        "explosivos": { "input": { "materiales_alquimicos": 2, "cristaleria": 1 }, "output": 1 },
+        "polvora": { 
+          "opcion_a": { "carbon": 1, "sal": 1 }, 
+          "opcion_b": { "fertilizante": 2 }, 
+          "output": 1 
+        },
+        "plasticos": { "input": { "caucho": 2 }, "output": 1 },
+        "neumaticos": { "input": { "plastico": 1, "caucho": 2 }, "output": 1 },
+        "maquinaria": { "input": { "acero": 2, "metal": 2, "caucho": 1, "plastico": 2 }, "output": 1 }
+      },
+      "armamento_y_defensa": {
+        "armas_rudimentarias": { "input": { "madera_util": 1 }, "output": 1 },
+        "armas": { "input": { "metal_cualquiera": 2 }, "output": 1 },
+        "armas_excelsas": { "input": { "acero_cualquiera": 2 }, "output": 1 },
+        "armas_de_fuego": { "input": { "acero_cualquiera": 1, "polvora": 1 }, "output": 1 },
+        "armaduras_excelsas": { "input": { "acero_cualquiera": 3 }, "output": 1 },
+        "material_balistico": { "input": { "explosivos": 3 }, "output": 1 },
+        "canon_clasico": { "input": { "acero_cualquiera": 2, "polvora": 1 }, "output": 1 },
+        "canon_balistico": { "input": { "acero_cualquiera": 3, "material_balistico": 1 }, "output": 1 }
+      },
+      "vehiculos": {
+        "carruajes": { "input": { "madera_util": 4, "metal_cualquiera": 1 }, "output": 1 }
+      }
+    }
+  }
+}

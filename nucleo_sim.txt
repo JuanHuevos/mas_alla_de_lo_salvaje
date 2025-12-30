@@ -1,0 +1,109 @@
+{
+  "system_architecture": {
+    "units_of_measurement": {
+      "medida": {
+        "definition": "Unidad atómica de conteo (1 individuo, 1 lingote, 1 ración).",
+        "usage": "Consumo de alimentos, recolección por turno, nacimientos."
+      },
+      "cuota": {
+        "definition": "Unidad de gestión macro (Agrupación de medidas).",
+        "usage": "Costes de construcción, mantenimiento de edificios, entrenamiento militar.",
+        "conversion_rates": {
+          "poblacion": "1 Cuota = 20 Medidas (Colonos).",
+          "recursos": "1 Cuota = 10 Medidas (Materiales).",
+          "doblones": "1 Cuota = 10 Medidas (Oro)."
+        }
+      }
+    }
+  },
+  "population_engine": {
+    "initial_setup": "El jugador elige 4 Cuotas iniciales (80 medidas totales). Puede mezclar Roles y Naturalezas.",
+    "population_nature_alignment": {
+      "neutral": {
+        "examples": "Humanos, Elfos, Medianos.",
+        "quality_modifier": 0,
+        "devotion_compatibility": "Universal (Cualquier devoción).",
+        "special_traits": "Adaptabilidad estándar."
+      },
+      "positiva": {
+        "examples": "Aasimares, Seres Celestiales.",
+        "quality_modifier": 2,
+        "devotion_compatibility": "Solo Devociones Positivas/Neutras.",
+        "special_traits": "Aumentan la paz social; rechazan el sacrilegio."
+      },
+      "negativa": {
+        "examples": "Orcos, Drows, Tieflings.",
+        "quality_modifier": -2,
+        "devotion_compatibility": "Solo Devociones Negativas/Neutras.",
+        "special_traits": "Alta resistencia física; generan fricción social."
+      },
+      "monstruo_salvaje": {
+        "examples": "Kobolds, Goblins, Minotauros.",
+        "quality_modifier": -1,
+        "devotion_compatibility": "Específicas de su especie.",
+        "special_traits": "Bono de +5 a la Inmigración Latente (se reproducen/llegan más rápido)."
+      }
+    },
+    "population_roles": {
+      "plebeyo": {
+        "function": "Crecimiento y labor general.",
+        "benefit": "Genera 1 Medida de colono/turno (crecimiento natural).",
+        "requirement": "Ninguno."
+      },
+      "academico": {
+        "function": "Investigación y Magia.",
+        "benefit": "Genera +3 Ideas/turno. Necesario para edificios avanzados.",
+        "requirement": "Construcción: Escuela o Academia."
+      },
+      "artesano": {
+        "function": "Producción y Comercio.",
+        "benefit": "Genera +1 Medida de Doblón extra en Mercados. Produce recursos procesados.",
+        "requirement": "Construcción: Taller o Manufactura."
+      },
+      "soldado": {
+        "function": "Defensa y Orden.",
+        "benefit": "Mantiene la guarnición. Mitiga penalizadores de eventos negativos.",
+        "requirement": "Construcción: Cuartel."
+      }
+    }
+  },
+  "resource_and_yield_logic": {
+    "production_types": {
+      "pasiva": {
+        "logic": "Generada por el Bioma y Edificios.",
+        "formula": "Base_Bioma + Modificadores_Edificios - 1 (Penalizador por falta de supervisión)."
+      },
+      "activa_extraccion_si": {
+        "logic": "Asignar 1 Cuota de Población (20 medidas) a una fuente de recurso.",
+        "formula": "Base_Bioma + Modificadores_Edificios + 2 (Bono de supervisión)."
+      }
+    },
+    "abundance_multipliers": {
+      "inexistente": 0,
+      "escaso": 0.5,
+      "normal": 1.0,
+      "abundante": 1.5,
+      "exuberante": 2.0
+    }
+  },
+  "turn_cycle_algorithm": {
+    "phase_1_sustenance": {
+      "action": "Restar 1 Medida Alimento por cada 1 Medida de Población.",
+      "failure_state": "Hambruna: Calidad -8, Crecimiento natural 0, Muertes 1d4 medidas/turno."
+    },
+    "phase_2_economy": {
+      "action_A": "Sumar Medidas de producción al Almacén.",
+      "action_B": "Recaudar Tributos (Cuotas Pop * Nivel_Tributo) en Medidas de Doblones.",
+      "action_C": "Pagar Mantenimiento de Edificios en Cuotas de Doblones."
+    },
+    "phase_3_growth": {
+      "latent_immigration": "Inmigración_Base + Calidad_Total + (Bono_Monstruo si aplica).",
+      "natural_reproduction": "Sumar 1 Medida de colono por cada Cuota de Plebeyo activa.",
+      "consolidation": "Cada 20 Medidas nuevas de población -> Crear 1 Cuota de Plebeyos."
+    }
+  },
+  "administrative_limits": {
+    "storage": "Límite de Cuotas definido por Almacenes. El exceso de Medidas se pierde al final del turno.",
+    "control": "Si Población (Medidas) > Capacidad_Administrativa, Inmigración se reduce al 50%."
+  }
+}

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Más Allá de lo Salvaje - Gestión de Asentamientos</title>
+  <meta name="description"
+    content="Sistema de control personal para gestionar tu asentamiento en el mundo de Más Allá de lo Salvaje">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap"
+    rel="stylesheet">
+
+  <!-- Estilos -->
+  <link rel="stylesheet" href="css/styles.css">
+
+  <!-- Favicon -->
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚔️</text></svg>">
+</head>
+
+<body>
+  <script>
+    window.onerror = function (msg, url, line, col, error) {
+      console.error("Global Error:", msg, error);
+      const loading = document.getElementById('loading-screen');
+      if (loading) {
+        loading.innerHTML = `
+          <div class="loading-content" style="color: #ff6b6b;">
+            <div class="loading-icono">⚠️</div>
+            <p>Error crítico: ${msg}</p>
+            <button onclick="localStorage.clear(); location.reload();" style="margin-top:1rem; padding: 0.5rem;">
+              Borrar Datos y Recargar
+            </button>
+          </div>
+        `;
+      }
+      return false;
+    };
+  </script>
+  <!-- Contenedor principal de la aplicación -->
+  <div id="app-container">
+    <!-- El contenido se renderiza dinámicamente -->
+    <div id="loading-screen" class="loading-screen">
+      <div class="loading-content">
+        <div class="loading-icono">⚔️</div>
+        <p>Cargando...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contenedor para notificaciones y popups que persisten entre renders -->
+  <div id="resultado-dado"></div>
+
+  <!-- Scripts -->
+  <script src="js/data.js"></script>
+  <script src="js/simulation.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/ui.js"></script>
+
+  <style>
+    /* Pantalla de carga */
+    .loading-screen {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #1a1a2e;
+    }
+
+    .loading-content {
+      text-align: center;
+      color: #f0e6d3;
+    }
+
+    .loading-icono {
+      font-size: 4rem;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+      }
+    }
+  </style>
+</body>
+
+</html>
