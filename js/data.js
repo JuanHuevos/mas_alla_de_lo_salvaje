@@ -239,7 +239,7 @@ const BIOMAS_BASE = {
             "Guano"              // 6
         ],
         // Exóticos d6: Desértico tiene 6 opciones
-        exoticos: ["Joyas", "Cristales Mágicos", "Metales Preciosos", "Reliquias", "Textiles Mágicos", "Fuente de Energía"],
+        exoticos: ["Joyas", "Cristales Mágicos", "Metales Preciosos", "Reliquias", "Textiles Mágicos"],
         dadoExotico: "d6",
         propiedadesBase: ["Sofocante", "Desolado", "Terrazas Obstruidas", "Caminos Claros"],
         influenciaMagica: "Baja",
@@ -654,8 +654,7 @@ const RECURSOS = {
 
     // Alimentos
     "Alimento": { categoria: "Alimento", tags: ["Alimento"], icono: "🥩" },
-    "Tubérculos": { categoria: "Alimento", tags: ["Alimento"], icono: "🥔" },
-    "Frutos": { categoria: "Alimento", tags: ["Alimento"], icono: "🍓" },
+    "Frutos y Tubérculos": { categoria: "Alimento", tags: ["Alimento", "Vegetal"], icono: "🥗" },
     "Carne": { categoria: "Alimento", tags: ["Alimento"], icono: "🥩" },
     "Pesca": { categoria: "Alimento", tags: ["Alimento"], icono: "🐟" },
     "Pesca Exótica": { categoria: "Alimento Exótico", tags: ["Alimento", "Exotico"], icono: "🦑" },
@@ -688,7 +687,6 @@ const RECURSOS = {
     "Especias Exóticas": { categoria: "Recurso Exótico", tags: ["Especia", "Exotico"], icono: "🌶️" },
 
     // Energía
-    "Fuente de Energía": { categoria: "Recurso Energético", tags: ["Energia"], icono: "⚡" },
     "Fuente de Energía Natural": { categoria: "Recurso Energético", tags: ["Energia"], icono: "🌿" },
     "Fuente de Energía Positiva": { categoria: "Recurso Energético", tags: ["Energia"], icono: "☀️" },
     "Fuente de Energía Negativa": { categoria: "Recurso Energético", tags: ["Energia"], icono: "🌑" },
@@ -830,6 +828,7 @@ const EDIFICIOS = {
         capacidad: { base: 4, porGrado: 4, rol: "Cualquiera" }, // 4 Cuotas Pob. (Por Grado) -> Base 4 at G1? Or 4 per grade implies 4*Grade. Assuming Base 4, +4 per Upgrade (G2=8).
         produccionTrabajo: { tipo: "Procesado", cantidad: 1 },
         permiteManufactura: true,
+        mantenimiento: { Doblones: 0 },
         descripcion: "+1 Recurso Procesado (del tipo elegido) por Cuota."
     },
     "Molinar": {
@@ -1121,7 +1120,9 @@ const EDIFICIOS = {
             { "Roca": 3 },
             { "Doblones": 7 }
         ],
-        descripcion: "Calidad +2 (+1/Grado)."
+        descripcion: "Calidad +2 (+1/Grado).",
+        efectos: { "Calidad": 2, "CalidadPorGrado": 1 },
+        mantenimiento: { Doblones: 1 }
     },
 
     // === LOGÍSTICA ===
@@ -1263,7 +1264,9 @@ const EDIFICIOS = {
             { "Roca": 2 },
             { "Doblones": 4 }
         ],
-        descripcion: "Calidad +3 (+3/Grado)."
+        descripcion: "Calidad +3 (+3/Grado).",
+        efectos: { "Calidad": 3, "CalidadPorGrado": 3 },
+        mantenimiento: { Doblones: 2 }
     }
 };
 

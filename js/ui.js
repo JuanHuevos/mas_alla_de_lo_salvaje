@@ -7,6 +7,7 @@
 let wizardState = {
   paso: 1,
   nombre: '',
+  imagenPersonalizada: null, // URL o base64 de imagen personalizada
   // Sistema de biomas
   tiradaD12: null,
   esBiomaEspecial: false,
@@ -239,6 +240,7 @@ function renderizarNombreExpedicion(container) {
 function renderizarListaAsentamientos(container) {
   const expedicion = estadoApp.expedicion;
   const asentamientos = expedicion?.asentamientos || [];
+  const pestanaActiva = estadoApp.pestanaExpedicion || 'asentamientos';
 
   container.innerHTML = `
     <div class="pantalla-lista">
@@ -260,25 +262,193 @@ function renderizarListaAsentamientos(container) {
         </div>
       </header>
       
+      <!-- Pestañas de Expedición -->
+      <nav class="expedicion-tabs">
+        <button class="expedicion-tab ${pestanaActiva === 'asentamientos' ? 'activa' : ''}" 
+                onclick="cambiarPestanaExpedicion('asentamientos')">
+          🏘️ Asentamientos
+        </button>
+        <button class="expedicion-tab ${pestanaActiva === 'conexiones' ? 'activa' : ''}" 
+                onclick="cambiarPestanaExpedicion('conexiones')">
+          🔗 Conexiones
+        </button>
+      </nav>
+      
       <main class="lista-contenido">
-        ${asentamientos.length === 0 ? `
-          <div class="lista-vacia">
-            <div class="lista-vacia-icono">🏕️</div>
-            <h3>No hay asentamientos</h3>
-            <p>Crea tu primer asentamiento para comenzar la expedición</p>
-            <button class="btn-principal" onclick="iniciarCreacionAsentamiento()">
-              <span class="btn-icono">➕</span>
-              <span class="btn-texto">Crear Primer Asentamiento</span>
-            </button>
-          </div>
-        ` : `
-          <div class="asentamientos-grid">
-            ${asentamientos.map(a => renderizarCardAsentamiento(a)).join('')}
-          </div>
-        `}
+        ${pestanaActiva === 'asentamientos' ? renderizarPestanaAsentamientos(asentamientos) : renderizarPestanaConexiones(asentamientos)}
       </main>
     </div>
   `;
+}
+
+function cambiarPestanaExpedicion(pestana) {
+  estadoApp.pestanaExpedicion = pestana;
+  renderizarPantalla();
+}
+
+function renderizarPestanaAsentamientos(asentamientos) {
+  if (asentamientos.length === 0) {
+    return `
+      <div class="lista-vacia">
+        <div class="lista-vacia-icono">🏕️</div>
+        <h3>No hay asentamientos</h3>
+        <p>Crea tu primer asentamiento para comenzar la expedición</p>
+        <button class="btn-principal" onclick="iniciarCreacionAsentamiento()">
+          <span class="btn-icono">➕</span>
+          <span class="btn-texto">Crear Primer Asentamiento</span>
+        </button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="asentamientos-grid">
+      ${asentamientos.map(a => renderizarCardAsentamiento(a)).join('')}
+    </div>
+  `;
+}
+
+function renderizarPestanaConexiones(asentamientos) {
+  if (asentamientos.length < 2) {
+    return `
+      <div class="lista-vacia">
+        <div class="lista-vacia-icono">🔗</div>
+        <h3>Necesitas más asentamientos</h3>
+        <p>Crea al menos 2 asentamientos para poder conectarlos</p>
+      </div>
+    `;
+  }
+
+  // Obtener todas las conexiones existentes
+  const conexionesExistentes = [];
+  asentamientos.forEach(a => {
+    const conexiones = a.conexiones || (a.conectadoA ? [a.conectadoA] : []);
+    conexiones.forEach(destId => {
+      // Evitar duplicados (A-B y B-A son la misma conexión)
+      const yaExiste = conexionesExistentes.some(c =>
+        (c.desde === a.id && c.hacia === destId) ||
+        (c.desde === destId && c.hacia === a.id)
+      );
+      if (!yaExiste) {
+        const destino = asentamientos.find(as => as.id === destId);
+        if (destino) {
+          conexionesExistentes.push({ desde: a.id, hacia: destId, nombreDesde: a.nombre, nombreHacia: destino.nombre });
+        }
+      }
+    });
+  });
+
+  return `
+    <div class="conexiones-panel">
+      <div class="conexiones-formulario">
+        <h4>➕ Crear Nueva Conexión</h4>
+        <div class="form-conexion">
+          <select id="conexion-desde" class="select-form">
+            <option value="">Desde...</option>
+            ${asentamientos.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+          </select>
+          <span class="conexion-flecha">↔️</span>
+          <select id="conexion-hacia" class="select-form">
+            <option value="">Hacia...</option>
+            ${asentamientos.map(a => `<option value="${a.id}">${a.nombre}</option>`).join('')}
+          </select>
+          <button class="btn-principal" onclick="crearConexionDesdeUI()">
+            <span class="btn-icono">🔗</span>
+            <span class="btn-texto">Conectar</span>
+          </button>
+        </div>
+      </div>
+      
+      <hr class="separador-seccion">
+      
+      <h4>📋 Conexiones Existentes (${conexionesExistentes.length})</h4>
+      ${conexionesExistentes.length === 0 ? `
+        <div class="conexiones-vacio">
+          <p>No hay conexiones entre asentamientos.</p>
+        </div>
+      ` : `
+        <div class="conexiones-lista">
+          ${conexionesExistentes.map(c => `
+            <div class="conexion-item">
+              <div class="conexion-info">
+                <span class="conexion-nodo">${c.nombreDesde}</span>
+                <span class="conexion-linea">↔️</span>
+                <span class="conexion-nodo">${c.nombreHacia}</span>
+              </div>
+              <button class="btn-mini btn-eliminar" onclick="eliminarConexionDesdeUI(${c.desde}, ${c.hacia})" title="Eliminar conexión">
+                ✕
+              </button>
+            </div>
+          `).join('')}
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function crearConexionDesdeUI() {
+  const desdeId = parseInt(document.getElementById('conexion-desde')?.value);
+  const haciaId = parseInt(document.getElementById('conexion-hacia')?.value);
+
+  if (!desdeId || !haciaId) {
+    alert("Selecciona ambos asentamientos");
+    return;
+  }
+
+  if (desdeId === haciaId) {
+    alert("No puedes conectar un asentamiento consigo mismo");
+    return;
+  }
+
+  const asentamientos = estadoApp.expedicion?.asentamientos || [];
+  const desde = asentamientos.find(a => a.id === desdeId);
+  const hacia = asentamientos.find(a => a.id === haciaId);
+
+  if (!desde || !hacia) return;
+
+  // Inicializar arrays de conexiones si no existen
+  if (!desde.conexiones) desde.conexiones = [];
+  if (!hacia.conexiones) hacia.conexiones = [];
+
+  // Verificar si ya están conectados
+  if (desde.conexiones.includes(haciaId)) {
+    alert("Estos asentamientos ya están conectados");
+    return;
+  }
+
+  // Crear conexión bidireccional
+  desde.conexiones.push(haciaId);
+  hacia.conexiones.push(desdeId);
+
+  guardarExpedicion();
+  renderizarPantalla();
+
+  if (typeof mostrarNotificacion === 'function') {
+    mostrarNotificacion(`🔗 Conexión creada: ${desde.nombre} ↔️ ${hacia.nombre}`, 'exito');
+  }
+}
+
+function eliminarConexionDesdeUI(desdeId, haciaId) {
+  const asentamientos = estadoApp.expedicion?.asentamientos || [];
+  const desde = asentamientos.find(a => a.id === desdeId);
+  const hacia = asentamientos.find(a => a.id === haciaId);
+
+  if (!desde || !hacia) return;
+
+  // Eliminar de ambos lados
+  if (desde.conexiones) {
+    desde.conexiones = desde.conexiones.filter(id => id !== haciaId);
+  }
+  if (hacia.conexiones) {
+    hacia.conexiones = hacia.conexiones.filter(id => id !== desdeId);
+  }
+
+  guardarExpedicion();
+  renderizarPantalla();
+
+  if (typeof mostrarNotificacion === 'function') {
+    mostrarNotificacion(`Conexión eliminada`, 'info');
+  }
 }
 
 /**
@@ -299,7 +469,10 @@ function renderizarCardAsentamiento(asentamiento) {
   return `
     <div class="asentamiento-card" onclick="seleccionarAsentamiento(${asentamiento.id})">
       <div class="card-header">
-        <span class="card-icono">${gradoData?.icono || '🏕️'}</span>
+        ${asentamiento.imagenPersonalizada
+      ? `<img src="${asentamiento.imagenPersonalizada}" class="card-imagen-custom" alt="Imagen del asentamiento">`
+      : `<span class="card-icono">${gradoData?.icono || '🏕️'}</span>`
+    }
         <div class="card-titulo">
           <h3>${asentamiento.nombre}</h3>
           <span class="card-grado">${asentamiento.grado}</span>
@@ -632,7 +805,8 @@ function iniciarCreacionConOpciones(esPrimerAsentamiento, conectadoA) {
       // Nuevos campos para expedición
       esPrimerAsentamiento: esPrimerAsentamiento,
       conexiones: conectadoA ? (Array.isArray(conectadoA) ? conectadoA : [conectadoA]) : [],
-      edificios: []
+      // Para asentamientos secundarios, Zona Residencial es obligatoria
+      edificios: esPrimerAsentamiento ? [] : ["Zona Residencial"]
     };
     estadoApp.pantalla = 'crear';
     renderizarPantalla();
@@ -702,9 +876,11 @@ function renderizarPasoActual() {
 // PASO 1: NOMBRE
 // =====================================================
 function renderizarPasoNombre() {
+  const tieneImagen = wizardState.imagenPersonalizada;
+
   return `
     <div class="paso-contenido paso-nombre">
-      <div class="paso-icono">🏕️</div>
+      <div class="paso-icono">${tieneImagen ? `<img src="${wizardState.imagenPersonalizada}" class="imagen-preview-icono" alt="Imagen personalizada">` : '🏕️'}</div>
       <h3>Nombra tu Asentamiento</h3>
       <p>Elige un nombre memorable para tu nuevo hogar</p>
       
@@ -718,6 +894,40 @@ function renderizarPasoNombre() {
           onchange="actualizarNombre(this.value)"
           oninput="actualizarNombre(this.value)"
         />
+      </div>
+      
+      <!-- Imagen Personalizada -->
+      <div class="imagen-personalizada-grupo">
+        <label class="imagen-label">🖼️ Imagen Personalizada (opcional)</label>
+        <div class="imagen-opciones">
+          ${tieneImagen ? `
+            <div class="imagen-preview-container">
+              <img src="${wizardState.imagenPersonalizada}" class="imagen-preview" alt="Preview">
+              <button class="btn-eliminar-imagen" onclick="eliminarImagenPersonalizada()" title="Eliminar imagen">✕</button>
+            </div>
+          ` : `
+            <div class="imagen-upload-zone" onclick="document.getElementById('input-imagen').click()">
+              <span class="upload-icono">📷</span>
+              <span class="upload-texto">Subir imagen</span>
+            </div>
+          `}
+          <input 
+            type="file" 
+            id="input-imagen" 
+            accept="image/*" 
+            style="display:none"
+            onchange="cargarImagenPersonalizada(this)"
+          />
+          <div class="imagen-url-input">
+            <input 
+              type="text" 
+              id="input-imagen-url" 
+              placeholder="...o pegar URL de imagen"
+              onchange="cargarImagenDesdeURL(this.value)"
+            />
+          </div>
+        </div>
+        <small class="imagen-ayuda">La imagen aparecerá en el header del asentamiento</small>
       </div>
       
       <div class="grado-info">
@@ -1776,6 +1986,54 @@ function actualizarNombre(valor) {
   wizardState.nombre = valor;
 }
 
+// Funciones para imagen personalizada
+function cargarImagenPersonalizada(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  if (!file.type.startsWith('image/')) {
+    mostrarNotificacion('Por favor selecciona un archivo de imagen válido', 'error');
+    return;
+  }
+
+  // Limitar tamaño a 2MB
+  if (file.size > 2 * 1024 * 1024) {
+    mostrarNotificacion('La imagen es muy grande. Máximo 2MB.', 'error');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    wizardState.imagenPersonalizada = e.target.result;
+    renderizarPantalla();
+    mostrarNotificacion('Imagen cargada correctamente', 'success');
+  };
+  reader.readAsDataURL(file);
+}
+
+function cargarImagenDesdeURL(url) {
+  if (!url || url.trim() === '') return;
+
+  // Validar que parece una URL de imagen
+  const urlLower = url.toLowerCase();
+  if (urlLower.match(/\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i) || urlLower.includes('data:image')) {
+    wizardState.imagenPersonalizada = url.trim();
+    renderizarPantalla();
+    mostrarNotificacion('Imagen URL cargada', 'success');
+  } else {
+    // Intentar cargarla de todas formas
+    wizardState.imagenPersonalizada = url.trim();
+    renderizarPantalla();
+    mostrarNotificacion('URL cargada (verificar validez)', 'warning');
+  }
+}
+
+function eliminarImagenPersonalizada() {
+  wizardState.imagenPersonalizada = null;
+  renderizarPantalla();
+  mostrarNotificacion('Imagen eliminada', 'info');
+}
+
 function togglePeculiaridad(nombre) {
   if (wizardState.peculiaridadFija === nombre) return; // No permitir quitar la fija
 
@@ -1911,6 +2169,8 @@ function confirmarCreacion() {
     nuevoAsentamiento.biomaFusionado = wizardState.biomaFusionado;
     nuevoAsentamiento.influenciaMagica = wizardState.influenciaMagica;
     nuevoAsentamiento.peculiaridadFija = wizardState.peculiaridadFija;
+    nuevoAsentamiento.imagenPersonalizada = wizardState.imagenPersonalizada;
+
 
     // Inicializar estado de simulación
     if (typeof resetearSimulacion === 'function') resetearSimulacion();
@@ -1983,34 +2243,73 @@ function renderizarHUD(container) {
   const biomaActual = a.biomaFusionado || BIOMAS_BASE[a.biomaBase];
   const modificadoresPropiedades = calcularModificadoresRecursos(a.propiedades);
 
+  // Quick stats calculations
+  const poblacionTotal = estadoSimulacion?.poblacion?.length || 0;
+  const doblones = estadoSimulacion?.doblones || 0;
+  const alimentosEnAlmacen = estadoSimulacion?.almacen?.["Alimento"] || 0;
+  const calidad = stats.calidadTotal;
+
   container.innerHTML = `
     <div class="hud-container">
+      <!-- HEADER PRINCIPAL -->
       <header class="hud-header">
-        <div class="hud-titulo">
-          <span class="hud-icono">${biomaActual?.icono || GRADOS[a.grado]?.icono || '🏕️'}</span>
-          <div>
-            <h1>${a.nombre}</h1>
-            <div class="hud-subtitulo">
-                <span class="hud-grado">${a.grado} • ${a.biomaFusionado?.nombre || a.biomaBase}</span>
-                <span class="separador">•</span>
-                <span class="capacidad-magica ${a.influenciaMagica?.toLowerCase()}" title="Influencia Mágica">
-                    ${INFLUENCIA_MAGICA[a.influenciaMagica]?.icono} Magia ${a.influenciaMagica}
-                </span>
-                <span class="separador">•</span>
-                <span class="stat-badge" title="Calidad Total">⭐ ${stats.calidadTotal}</span>
-                <span class="stat-badge" title="Influencia">📜 ${estadoSimulacion?.recursosEspeciales?.influencia || 0}</span>
+        <div class="hud-header-left">
+          ${a.imagenPersonalizada
+      ? `<img src="${a.imagenPersonalizada}" class="hud-imagen-personalizada" alt="${a.nombre}">`
+      : `<span class="hud-icono-grande">${biomaActual?.icono || GRADOS[a.grado]?.icono || '🏕️'}</span>`
+    }
+          <div class="hud-info-asentamiento">
+            <h1 class="hud-nombre">${a.nombre}</h1>
+            <div class="hud-meta">
+              <span class="hud-grado">${a.grado}</span>
+              <span class="hud-bioma">${a.biomaFusionado?.nombre || a.biomaBase}</span>
+              <span class="hud-magia ${a.influenciaMagica?.toLowerCase()}">${INFLUENCIA_MAGICA[a.influenciaMagica]?.icono} ${a.influenciaMagica}</span>
             </div>
           </div>
         </div>
-        <div class="hud-acciones">
-          <button class="btn-accion btn-expedicion" onclick="volverALista()" title="Ver Expedición">📋</button>
-          <button class="btn-accion" onclick="mostrarOpciones()">⚙️</button>
+        
+        <div class="hud-header-center">
+          <div class="hud-quick-stats">
+            <div class="quick-stat" title="Cuotas de Población">
+              <span class="qs-icon">👥</span>
+              <span class="qs-value">${poblacionTotal}</span>
+              <span class="qs-label">Población</span>
+            </div>
+            <div class="quick-stat" title="Doblones disponibles">
+              <span class="qs-icon">💰</span>
+              <span class="qs-value ${doblones < 0 ? 'negativo' : ''}">${doblones}</span>
+              <span class="qs-label">Doblones</span>
+            </div>
+            <div class="quick-stat" title="Influencia política">
+              <span class="qs-icon">🏛️</span>
+              <span class="qs-value">${estadoSimulacion?.recursosEspeciales?.influencia || 0}</span>
+              <span class="qs-label">Influencia</span>
+            </div>
+            <div class="quick-stat" title="Alimento en almacén">
+              <span class="qs-icon">🌾</span>
+              <span class="qs-value ${alimentosEnAlmacen < poblacionTotal ? 'warning' : ''}">${alimentosEnAlmacen}</span>
+              <span class="qs-label">Alimento</span>
+            </div>
+            <div class="quick-stat" title="Calidad Total del Asentamiento">
+              <span class="qs-icon">⭐</span>
+              <span class="qs-value ${calidad >= 0 ? 'positivo' : 'negativo'}">${calidad >= 0 ? '+' : ''}${calidad}</span>
+              <span class="qs-label">Calidad</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="hud-header-right">
+          <button class="btn-header" onclick="volverALista()" title="Ver Expedición">📋</button>
+          <button class="btn-header" onclick="mostrarOpciones()" title="Opciones">⚙️</button>
         </div>
       </header>
       
+      <!-- PANEL DE TRIBUTO -->
+      ${renderizarPanelTributo(a, stats)}
+      
       ${estadoSimulacion && estadoSimulacion.esHambruna ? `
         <div class="alerta-hambruna">
-            ☠️ ¡HAMBRUNA! (Sin Alimentos: Calidad -8, Crecimiento 0)
+            ☠️ ¡HAMBRUNA! Sin alimentos: Calidad -8, Crecimiento detenido
         </div>
       ` : ''}
 
@@ -2025,6 +2324,85 @@ function renderizarHUD(container) {
 
 // Estado de navegación del HUD
 
+// Panel de Tributo desplegable
+function renderizarPanelTributo(a, stats) {
+  const tributoActual = a.tributo || "Sin Tributo";
+  const tributoData = TRIBUTOS[tributoActual] || TRIBUTOS["Sin Tributo"];
+  const poblacionTotal = estadoSimulacion?.poblacion?.length || 0;
+  const limiteAdmin = stats.grado.admin || 10;
+  const poblacionTributable = Math.min(poblacionTotal, limiteAdmin);
+  const ingresosEstimados = poblacionTributable * tributoData.doblones;
+
+  return `
+    <details class="panel-tributo">
+      <summary class="tributo-resumen">
+        <span class="tributo-icono">${tributoData.icono}</span>
+        <span class="tributo-titulo">Tributo: <strong>${tributoActual}</strong></span>
+        <span class="tributo-preview">
+          +${ingresosEstimados} 💰/turno | ${tributoData.calidad >= 0 ? '+' : ''}${tributoData.calidad} ⭐
+        </span>
+      </summary>
+      <div class="tributo-contenido">
+        <div class="tributo-info">
+          <p>
+            <strong>Límite Administrativo:</strong> ${limiteAdmin} cuotas 
+            (Población actual: ${poblacionTotal})
+          </p>
+          <p class="tributo-nota">
+            ⚠️ Solo puedes cobrar tributo a un máximo de <strong>${limiteAdmin}</strong> cuotas de población.
+          </p>
+        </div>
+        
+        <div class="tributo-opciones">
+          ${Object.entries(TRIBUTOS).map(([nombre, data]) => {
+    const esActual = nombre === tributoActual;
+    const ingresosPrev = poblacionTributable * data.doblones;
+    return `
+              <div class="tributo-opcion ${esActual ? 'activa' : ''}" onclick="cambiarTributo('${nombre}')">
+                <div class="tributo-opcion-header">
+                  <span class="tributo-opcion-icono">${data.icono}</span>
+                  <span class="tributo-opcion-nombre">${nombre}</span>
+                  ${esActual ? '<span class="badge-actual">✓ Actual</span>' : ''}
+                </div>
+                <div class="tributo-opcion-stats">
+                  <span class="stat-doblones">+${data.doblones} 💰/cuota</span>
+                  <span class="stat-calidad ${data.calidad >= 0 ? 'positivo' : 'negativo'}">
+                    ${data.calidad >= 0 ? '+' : ''}${data.calidad} ⭐ Calidad
+                  </span>
+                </div>
+                <div class="tributo-opcion-preview">
+                  Estimado: <strong>+${ingresosPrev}</strong> Doblones/turno
+                </div>
+              </div>
+            `;
+  }).join('')}
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function cambiarTributo(nuevoTributo) {
+  if (!TRIBUTOS[nuevoTributo]) return;
+
+  // Actualizar en el asentamiento
+  if (estadoApp.asentamiento) {
+    estadoApp.asentamiento.tributo = nuevoTributo;
+
+    // Guardar cambios
+    if (typeof guardarExpedicion === 'function') {
+      guardarExpedicion();
+    }
+
+    renderizarPantalla();
+
+    if (typeof mostrarNotificacion === 'function') {
+      const data = TRIBUTOS[nuevoTributo];
+      mostrarNotificacion(`${data.icono} Tributo cambiado a: ${nuevoTributo}`, 'info');
+    }
+  }
+}
+
 
 function cambiarPestana(nombre) {
   pestanaActiva = nombre;
@@ -2033,14 +2411,14 @@ function cambiarPestana(nombre) {
 
 function renderizarNavegacionHUD() {
   const pestanas = [
-    { id: 'militar', icono: '⚔️', label: 'Militar' },
-    { id: 'diplomacia', icono: '🤝', label: 'Diplomacia' },
-    { id: 'devocion', icono: '🙏', label: 'Devoción' },
-    { id: 'poblacion', icono: '👥', label: 'Población' },
     { id: 'bioma', icono: '🌿', label: 'Bioma' },
+    { id: 'poblacion', icono: '👥', label: 'Población' },
     { id: 'edificios', icono: '🏛️', label: 'Edificios' },
     { id: 'almacenamiento', icono: '📦', label: 'Almacén' },
-    { id: 'comercio', icono: '⚖️', label: 'Comercio' }
+    { id: 'comercio', icono: '⚖️', label: 'Comercio' },
+    { id: 'militar', icono: '⚔️', label: 'Militar' },
+    { id: 'diplomacia', icono: '🤝', label: 'Diplomacia' },
+    { id: 'devocion', icono: '🙏', label: 'Devoción' }
   ];
 
   const turnoActual = estadoSimulacion?.turno || 0;
@@ -2048,32 +2426,37 @@ function renderizarNavegacionHUD() {
 
   return `
     <nav class="hud-nav">
-      <div class="hud-turno-display">
-        <span class="turno-label">⏱️ Turno</span>
-        <span class="turno-numero">${turnoActual}</span>
+      <div class="nav-turno">
+        <span class="turno-badge">
+          <span class="turno-icono">📅</span>
+          <span class="turno-numero">${turnoActual}</span>
+        </span>
       </div>
-      <div class="hud-tabs">
+      
+      <div class="nav-tabs-container">
         ${pestanas.map(p => `
           <button class="nav-tab ${pestanaActiva === p.id ? 'activa' : ''}" 
-                  onclick="cambiarPestana('${p.id}')">
+                  onclick="cambiarPestana('${p.id}')"
+                  title="${p.label}">
             <span class="tab-icono">${p.icono}</span>
             <span class="tab-label">${p.label}</span>
           </button>
         `).join('')}
       </div>
-      <div class="hud-turno-controles">
-        <button class="btn-deshacer-turno ${!puedeDeshacer ? 'disabled' : ''}" 
+      
+      <div class="nav-acciones">
+        <button class="btn-turno btn-deshacer ${!puedeDeshacer ? 'disabled' : ''}" 
                 onclick="btnDeshacerTurno()" 
                 ${!puedeDeshacer ? 'disabled' : ''}
                 title="Deshacer último turno">
-          ⏪ Deshacer
+          ⏪
         </button>
-        <button class="btn-pasar-turno" onclick="btnPasarTurno()" title="Pasar al siguiente turno">
-          ⏩ Pasar Turno
+        <button class="btn-turno btn-avanzar" onclick="btnPasarTurno()" title="Pasar al siguiente turno">
+          Turno ⏩
         </button>
       </div>
     </nav>
-    `;
+  `;
 }
 
 function renderizarContenidoPestana(a, stats) {
@@ -2543,15 +2926,22 @@ function renderizarPestanaPoblacion(a, stats) {
 
 function renderizarPestanaBioma(a, stats) {
   const recursos = a.recursos || {};
-  const produccionBioma = calcularProduccionTotal(recursos, stats.calidadTotal);
+  const produccionBioma = calcularProduccionTotal(recursos, stats.calidadTotal, stats.bonificaciones || {});
   const produccionEdificios = calcularProduccionEdificios(a.edificios || [], stats);
 
   // Biome Info
   const biomaDef = a.biomaFusionado || BIOMAS_BASE[a.biomaBase] || {};
   const nombreBioma = biomaDef.nombre || a.biomaBase;
   const descripcion = biomaDef.descripcion || '';
-  const peculiaridad = a.peculiaridad || 'Ninguna';
-  const pecData = PECULIARIDADES && PECULIARIDADES[peculiaridad];
+
+  // Peculiaridades - handle both array and legacy singular
+  const peculiaridades = a.peculiaridades || (a.peculiaridad ? [a.peculiaridad] : []);
+  const peculiarText = peculiaridades.length > 0
+    ? peculiaridades.map(pec => {
+      const pecData = PECULIARIDADES && PECULIARIDADES[pec];
+      return `${pecData?.icono || ''} ${pec}`;
+    }).join(', ')
+    : 'Ninguna';
 
   const bonusesHTML = Object.entries(stats.bonificaciones || {}).map(([k, v]) => {
     if (v === 0) return '';
@@ -2570,7 +2960,7 @@ function renderizarPestanaBioma(a, stats) {
     <div class="panel panel-full">
          <h3>🌿 Bioma: ${nombreBioma}</h3>
          <div class="bioma-info" style="margin-bottom:1rem; padding:1rem; background:rgba(255,255,255,0.05); border-radius:6px;">
-             ${pecData ? `<p><strong>Peculiaridad:</strong> ${peculiaridad} ${pecData.icono}</p>` : `<p><strong>Peculiaridad:</strong> ${peculiaridad}</p>`}
+             <p><strong>Peculiaridades:</strong> ${peculiarText}</p>
              <p>${descripcion}</p>
              ${Object.keys(stats.bonificaciones).length > 0 ?
       `<div style="margin-top:0.5rem; background:rgba(0,0,0,0.2); padding:0.5rem; border-radius:4px;">
@@ -2622,13 +3012,6 @@ function renderizarPestanaBioma(a, stats) {
                 </table>
                 `}
              </div>
-             
-             <!-- Alimentos Simple Summary -->
-             <div class="seccion-produccion" style="margin-top:1rem;">
-                <h4>🌾 Balance Alimentos</h4>
-                <p>Prod: +${pBioma + pEdif} | Consumo: -${consumoAlimentos} | <strong>Neto: ${bal > 0 ? '+' : ''}${bal}</strong></p>
-             </div>
-             
          </div>
     </div>
   `;
@@ -2664,6 +3047,7 @@ function esManufactura(nombreRecurso) {
 
 function renderizarPestanaAlmacenamiento(a, stats) {
   const almacen = estadoSimulacion?.almacen || {};
+  const subPestanaAlmacen = estadoApp.subPestanaAlmacen || 'inventario';
 
   // Stats Barra
   const capacidadMaxCuotas = stats.grado.almacenamiento;
@@ -2672,6 +3056,53 @@ function renderizarPestanaAlmacenamiento(a, stats) {
   const porcentaje = Math.min(100, (ocupado / capacidadMaxMedidas) * 100);
   const estadoBarra = porcentaje >= 100 ? 'critico' : porcentaje >= 80 ? 'alerta' : 'normal';
 
+  return `
+    <div class="panel panel-full panel-almacenamiento">
+        <div class="almacen-header">
+             <div class="stat-card stat-doblones">
+                <span class="stat-icono">💰</span>
+                <div class="stat-info">
+                    <span class="stat-label">Tesoro</span>
+                    <span class="stat-value">${estadoSimulacion?.doblones || 0} Doblones</span>
+                </div>
+            </div>
+
+            <div class="almacen-capacidad">
+                <div class="barra-info">
+                    <span>${ocupado} / ${capacidadMaxMedidas} Medidas</span>
+                    <span>${Math.round(porcentaje)}%</span>
+                </div>
+                <div class="barra-track">
+                    <div class="barra-fill ${estadoBarra}" style="width: ${porcentaje}%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sub-pestañas de Almacenamiento -->
+        <nav class="almacen-subtabs">
+            <button class="almacen-subtab ${subPestanaAlmacen === 'inventario' ? 'activa' : ''}" 
+                    onclick="cambiarSubPestanaAlmacen('inventario')">
+                📦 Inventario
+            </button>
+            <button class="almacen-subtab ${subPestanaAlmacen === 'balance' ? 'activa' : ''}" 
+                    onclick="cambiarSubPestanaAlmacen('balance')">
+                📊 Balance de Recursos
+            </button>
+        </nav>
+
+        ${subPestanaAlmacen === 'inventario'
+      ? renderizarSubPestanaInventario(almacen, stats)
+      : renderizarSubPestanaBalance(a, stats)}
+    </div>
+    `;
+}
+
+function cambiarSubPestanaAlmacen(subPestana) {
+  estadoApp.subPestanaAlmacen = subPestana;
+  renderizarPantalla();
+}
+
+function renderizarSubPestanaInventario(almacen, stats) {
   // Separar y Ordenar
   const itemsManufactura = [];
   const itemsBioma = [];
@@ -2731,61 +3162,408 @@ function renderizarPestanaAlmacenamiento(a, stats) {
   };
 
   return `
-    <div class="panel panel-full panel-almacenamiento">
-        <div class="almacen-header">
-             <div class="stat-card stat-doblones">
-                <span class="stat-icono">💰</span>
-                <div class="stat-info">
-                    <span class="stat-label">Tesoro</span>
-                    <span class="stat-value">${estadoSimulacion?.doblones || 0} Doblones</span>
-                </div>
-            </div>
+    <div class="almacen-secciones-grid">
+        ${renderTable(itemsManufactura, "Manufacturas", "🏭")}
+        ${renderTable(itemsBioma, "Bioma / Natural", "🌍")}
+    </div>
 
-            <div class="almacen-capacidad">
-                <div class="barra-info">
-                    <span>${ocupado} / ${capacidadMaxMedidas} Medidas</span>
-                    <span>${Math.round(porcentaje)}%</span>
-                </div>
-                <div class="barra-track">
-                    <div class="barra-fill ${estadoBarra}" style="width: ${porcentaje}%"></div>
-                </div>
-            </div>
-        </div>
-
-        <div class="almacen-secciones-grid">
-            ${renderTable(itemsManufactura, "Manufacturas", "🏭")}
-            ${renderTable(itemsBioma, "Bioma / Natural", "🌍")}
-        </div>
-
-        <div class="form-tipificacion" style="margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
-            <h4>➕ Tipificar Nuevo Recurso</h4>
-            <div class="form-row" style="display: flex; gap: 10px; margin-top: 10px;">
-                <select id="select-recurso-nuevo" class="select-form" style="flex: 2; background: #2a2a4a; color: white; border: 1px solid #444; padding: 5px;">
-                    <option value="">Seleccionar recurso...</option>
-                    ${Object.keys(RECURSOS)
+    <div class="form-tipificacion" style="margin-top: 2rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
+        <h4>➕ Tipificar Nuevo Recurso</h4>
+        <div class="form-row" style="display: flex; gap: 10px; margin-top: 10px;">
+            <select id="select-recurso-nuevo" class="select-form" style="flex: 2; background: #2a2a4a; color: white; border: 1px solid #444; padding: 5px;">
+                <option value="">Seleccionar recurso...</option>
+                ${Object.keys(RECURSOS)
       .sort()
       .map(r => `<option value="${r}">${RECURSOS[r].icono} ${r}</option>`).join('')}
-                </select>
-                <input type="number" id="input-cantidad-nueva" class="input-form" placeholder="Cant." min="0" value="0" style="flex: 1; background: #2a2a4a; color: white; border: 1px solid #444; padding: 5px;">
-                <button class="btn-principal" style="padding: 5px 15px;" onclick="agregarRecursoDesdeUI()">Agregar</button>
-            </div>
-            <small style="color:#aaa; display:block; margin-top:5px;">Ahora puedes agregar recursos existentes para incrementar su stock.</small>
+            </select>
+            <input type="number" id="input-cantidad-nueva" class="input-form" placeholder="Cant." min="0" value="0" style="flex: 1; background: #2a2a4a; color: white; border: 1px solid #444; padding: 5px;">
+            <button class="btn-principal" style="padding: 5px 15px;" onclick="agregarRecursoDesdeUI()">Agregar</button>
         </div>
+        <small style="color:#aaa; display:block; margin-top:5px;">Ahora puedes agregar recursos existentes para incrementar su stock.</small>
     </div>
-    `;
+  `;
+}
+
+function renderizarSubPestanaBalance(a, stats) {
+  const recursos = a.recursos || {};
+  const produccionBioma = calcularProduccionTotal(recursos, stats.calidadTotal, stats.bonificaciones || {});
+  const produccionEdificios = calcularProduccionEdificios(a.edificios || [], stats);
+
+  const totalCuotas = estadoSimulacion.poblacion ? estadoSimulacion.poblacion.length : 0;
+  const consumoAlimentos = totalCuotas;
+
+  // Calcular produccion total de alimentos (sumando todos los tipos)
+  let produccionAlimentosTotal = 0;
+  const desgloseAlimentos = {};
+
+  // Helper para sumar si es alimento
+  const procesarRecursoAlimento = (nombre, cantidad) => {
+    if (cantidad <= 0) return;
+    const def = RECURSOS[nombre];
+    // Check if it's food (by name "Alimento", category "Alimento" or tag "Alimento")
+    const esAlimento = nombre === "Alimento" ||
+      (def && (def.categoria === "Alimento" || (def.tags && def.tags.includes("Alimento"))));
+
+    if (esAlimento) {
+      produccionAlimentosTotal += cantidad;
+      desgloseAlimentos[nombre] = (desgloseAlimentos[nombre] || 0) + cantidad;
+    }
+  };
+
+  // Sumar del Bioma
+  Object.entries(produccionBioma).forEach(([nombre, data]) => {
+    procesarRecursoAlimento(nombre, data.medidas || 0);
+  });
+
+  // Sumar de Edificios
+  Object.entries(produccionEdificios).forEach(([nombre, data]) => {
+    procesarRecursoAlimento(nombre, data.total || 0);
+  });
+
+  const balanceAlimento = produccionAlimentosTotal - consumoAlimentos;
+
+  // Generar HTML del desglose
+  const desgloseHTML = Object.entries(desgloseAlimentos)
+    .map(([nombre, cant]) => `<div style="display:flex; justify-content:space-between; font-size:0.85rem; color:#aaa;"><span>+ ${nombre}:</span> <span>${cant}</span></div>`)
+    .join('');
+
+  // === MANUFACTURA: Calcular input/output ===
+  const manufacturaInputs = {};  // Recursos consumidos
+  const manufacturaOutputs = {}; // Recursos producidos
+
+  // Leer desde edificios del asentamiento (donde se guarda la receta)
+  const edificiosAsentamiento = a.edificios || [];
+  edificiosAsentamiento.forEach(instancia => {
+    if (typeof instancia === 'string') return; // Skip legacy string format
+
+    const edificioDef = typeof EDIFICIOS !== 'undefined' ? EDIFICIOS[instancia.nombre] : null;
+    if (!edificioDef?.permiteManufactura || !instancia.receta) return;
+
+    // Buscar trabajadores asignados
+    const trabajadores = (estadoSimulacion?.poblacion || []).filter(p => p.asignacion === instancia.id).length;
+    if (trabajadores <= 0) return;
+
+    // Buscar la receta (manejar formato "key" o "key:opcion_a")
+    if (typeof RECETAS_MANUFACTURA === 'undefined') return;
+
+    const [recetaKey, opcion] = instancia.receta.includes(':')
+      ? instancia.receta.split(':')
+      : [instancia.receta, null];
+
+    for (const categoria of Object.values(RECETAS_MANUFACTURA)) {
+      const recetaBase = categoria[recetaKey];
+      if (!recetaBase) continue;
+
+      // Obtener la receta correcta (base u opción)
+      let receta = recetaBase;
+      if (opcion && recetaBase[opcion]) {
+        receta = recetaBase[opcion];
+      }
+
+      // Inputs (consumo)
+      const inputData = receta.input;
+      if (inputData) {
+        for (const [recurso, cantidad] of Object.entries(inputData)) {
+          manufacturaInputs[recurso] = (manufacturaInputs[recurso] || 0) + (cantidad * trabajadores);
+        }
+      }
+
+      // Outputs (producción)
+      const outputData = receta.output;
+      if (outputData && outputData.Recurso) {
+        const recursoProd = outputData.Recurso;
+        const cantidadProd = outputData.Cantidad || 1;
+        manufacturaOutputs[recursoProd] = (manufacturaOutputs[recursoProd] || 0) + (cantidadProd * trabajadores);
+      }
+      break;
+    }
+  });
+
+  // === BALANCE DOBLONES ===
+  const tributoActual = a.tributo || "Sin Tributo";
+  const tributoData = typeof TRIBUTOS !== 'undefined' ? (TRIBUTOS[tributoActual] || TRIBUTOS["Sin Tributo"]) : { doblones: 0, calidad: 0 };
+  const limiteAdmin = stats.grado?.admin || 10;
+  const poblacionTributable = Math.min(totalCuotas, limiteAdmin);
+  const ingresosTributo = poblacionTributable * tributoData.doblones;
+
+  // Mantenimiento - usar el valor precalculado que aplica modificadores correctamente
+  const gastoMantenimiento = stats.mantenimientoEdificios || 0;
+
+  const balanceDoblones = ingresosTributo - gastoMantenimiento;
+
+  // Recopilar todos los recursos con producción
+  const recursosConProduccion = new Set();
+  Object.keys(produccionBioma).forEach(r => recursosConProduccion.add(r));
+  Object.keys(produccionEdificios).forEach(r => recursosConProduccion.add(r));
+  Object.keys(manufacturaInputs).forEach(r => recursosConProduccion.add(r));
+  Object.keys(manufacturaOutputs).forEach(r => recursosConProduccion.add(r));
+
+  // Calcular balance para cada recurso
+  const balances = [];
+  recursosConProduccion.forEach(recurso => {
+    const prodBioma = produccionBioma[recurso]?.medidas || 0;
+    const prodEdif = produccionEdificios[recurso]?.total || 0;
+    const manufInput = manufacturaInputs[recurso] || 0;
+    const manufOutput = manufacturaOutputs[recurso] || 0;
+    let consumo = manufInput;
+
+    // Consumo especial para Alimento
+    if (recurso === "Alimento") {
+      consumo += consumoAlimentos;
+    }
+
+    const neto = (prodBioma + prodEdif + manufOutput) - consumo;
+
+    if (prodBioma !== 0 || prodEdif !== 0 || consumo !== 0 || manufOutput !== 0) {
+      balances.push({
+        recurso,
+        prodBioma,
+        prodEdif,
+        manufOutput,
+        consumo,
+        neto,
+        icono: RECURSOS[recurso]?.icono || '📦'
+      });
+    }
+  });
+
+  // Ordenar: Alimento primero, luego por nombre
+  balances.sort((a, b) => {
+    if (a.recurso === "Alimento") return -1;
+    if (b.recurso === "Alimento") return 1;
+    return a.recurso.localeCompare(b.recurso);
+  });
+
+  return `
+    <div class="balance-recursos">
+        <h4>📊 Balance de Recursos por Turno</h4>
+        <p style="opacity:0.7; margin-bottom:1rem;">Este panel muestra cómo cambian tus recursos cada turno.</p>
+        
+        <!-- Balance Doblones destacado -->
+        <div class="balance-destacado ${balanceDoblones >= 0 ? 'positivo' : 'negativo'}">
+            <div class="balance-destacado-icono">💰</div>
+            <div class="balance-destacado-info">
+                <h5>Balance de Doblones</h5>
+                <div class="balance-desglose">
+                    <span>Tributos: <strong>+${ingresosTributo}</strong></span>
+                    <span>Mantenimiento: <strong>-${gastoMantenimiento}</strong></span>
+                </div>
+            </div>
+            <div class="balance-destacado-neto">
+                <span class="neto-label">Neto</span>
+                <span class="neto-value ${balanceDoblones >= 0 ? 'positivo' : 'negativo'}">
+                    ${balanceDoblones >= 0 ? '+' : ''}${balanceDoblones}
+                </span>
+            </div>
+        </div>
+
+        <!-- Balance Alimentos destacado -->
+        <div class="balance-destacado ${balanceAlimento >= 0 ? 'positivo' : 'negativo'}">
+            <div class="balance-destacado-icono">🌾</div>
+            <div class="balance-destacado-info">
+                <h5>Balance de Alimentos</h5>
+                <div class="balance-desglose" style="display:block;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;"><span>Producción Total: <strong>+${produccionAlimentosTotal}</strong></span></div>
+                    ${desgloseHTML ? `<div style="margin-left:5px; border-left:2px solid rgba(255,255,255,0.1); padding-left:8px; margin-bottom:8px;">${desgloseHTML}</div>` : ''}
+                    <div style="display:flex; justify-content:space-between; border-top:1px solid rgba(255,255,255,0.1); padding-top:4px;"><span>Consumo: <strong>-${consumoAlimentos}</strong></span></div>
+                </div>
+            </div>
+            <div class="balance-destacado-neto">
+                <span class="neto-label">Neto</span>
+                <span class="neto-value ${balanceAlimento >= 0 ? 'positivo' : 'negativo'}">
+                    ${balanceAlimento >= 0 ? '+' : ''}${balanceAlimento}
+                </span>
+            </div>
+        </div>
+
+        <hr class="separador-seccion">
+
+        <!-- Tabla de todos los recursos -->
+        <h4>📦 Balance de Recursos</h4>
+        ${balances.length > 0 ? `
+        <table class="tabla-balance">
+            <thead>
+                <tr>
+                    <th>Recurso</th>
+                    <th>Bioma</th>
+                    <th>Edificios</th>
+                    <th>Manufact.</th>
+                    <th>Consumo</th>
+                    <th>Neto</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${balances.map(b => `
+                    <tr class="${b.neto > 0 ? 'fila-positiva' : b.neto < 0 ? 'fila-negativa' : ''}">
+                        <td>
+                            <span class="recurso-icono">${b.icono}</span>
+                            ${b.recurso}
+                        </td>
+                        <td>${b.prodBioma > 0 ? '+' + b.prodBioma : (b.prodBioma || '-')}</td>
+                        <td>${b.prodEdif > 0 ? '+' + b.prodEdif : (b.prodEdif || '-')}</td>
+                        <td class="positivo">${b.manufOutput > 0 ? '+' + b.manufOutput : '-'}</td>
+                        <td class="negativo">${b.consumo > 0 ? '-' + b.consumo : '-'}</td>
+                        <td class="${b.neto >= 0 ? 'positivo' : 'negativo'}">
+                            <strong>${b.neto >= 0 ? '+' : ''}${b.neto}</strong>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+        ` : '<p style="opacity:0.6;">No hay producción de recursos activa.</p>'}
+    </div>
+  `;
 }
 
 function renderizarPestanaComercio(a, stats) {
-  return `
-    <div class="panel panel-full">
-        <h3>⚖️ Centro de Comercio</h3>
-        <div class="panel-contenido">
-            <div class="panel-vacio" style="text-align: center; padding: 3rem;">
-                <div class="icono-vacio" style="font-size: 3rem; margin-bottom: 1rem;">🚢</div>
-                <p>El mercado está tranquilo de momento.</p>
-                <small style="color: #aaa;">Aquí podrás intercambiar recursos por doblones u otros bienes, lo que afectará directamente a tu Almacenamiento.</small>
+  const historial = estadoSimulacion?.historialComercio || [];
+  const turnoActual = estadoSimulacion?.turno || 0;
+
+  // Ordenar historial por turno descendente (más recientes primero)
+  const historialOrdenado = [...historial].sort((a, b) => b.turno - a.turno);
+
+  const renderFormulario = () => `
+    <div class="comercio-form">
+        <h4>➕ Registrar Transacción</h4>
+        <div class="form-grid-comercio">
+            <div class="form-group">
+                <label>Tipo</label>
+                <select id="comercio-tipo" class="select-form">
+                    <option value="entrada">📥 Entrada</option>
+                    <option value="salida">📤 Salida</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Recurso</label>
+                <select id="comercio-recurso" class="select-form">
+                    <option value="">Seleccionar...</option>
+                    <option value="Doblones">💰 Doblones</option>
+                    ${Object.keys(RECURSOS)
+      .sort()
+      .map(r => `<option value="${r}">${RECURSOS[r].icono} ${r}</option>`)
+      .join('')}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Cantidad</label>
+                <input type="number" id="comercio-cantidad" class="input-form" min="1" value="1" placeholder="Cantidad">
+            </div>
+            <div class="form-group">
+                <label>Turno</label>
+                <input type="number" id="comercio-turno" class="input-form" min="0" value="${turnoActual}" placeholder="Turno">
+            </div>
+            <div class="form-group">
+                <label>Comerciante</label>
+                <input type="text" id="comercio-comerciante" class="input-form" placeholder="Nombre del comerciante">
+            </div>
+            <div class="form-group form-action">
+                <button class="btn-principal" onclick="agregarComercioDesdeUI()">
+                    <span class="btn-icono">✓</span>
+                    <span class="btn-texto">Registrar</span>
+                </button>
             </div>
         </div>
+        <small style="color:#aaa; display:block; margin-top:8px;">
+            📌 Turno actual de la simulación: <strong>${turnoActual}</strong>
+        </small>
+    </div>
+  `;
+
+  const renderHistorial = () => {
+    if (historialOrdenado.length === 0) {
+      return `
+        <div class="comercio-vacio">
+            <div class="icono-vacio">📜</div>
+            <p>No hay transacciones registradas.</p>
+        </div>
+      `;
+    }
+
+    return `
+      <table class="tabla-comercio">
+          <thead>
+              <tr>
+                  <th>Turno</th>
+                  <th>Tipo</th>
+                  <th>Recurso</th>
+                  <th>Cantidad</th>
+                  <th>Comerciante</th>
+              </tr>
+          </thead>
+          <tbody>
+              ${historialOrdenado.map(entry => `
+                  <tr class="${entry.tipo === 'entrada' ? 'tipo-entrada' : 'tipo-salida'}">
+                      <td><strong>${entry.turno}</strong></td>
+                      <td>
+                          <span class="badge-tipo ${entry.tipo}">
+                              ${entry.tipo === 'entrada' ? '📥 Entrada' : '📤 Salida'}
+                          </span>
+                      </td>
+                      <td>
+                          <span class="recurso-icono">${RECURSOS[entry.recurso]?.icono || '📦'}</span>
+                          ${entry.recurso}
+                      </td>
+                      <td class="${entry.tipo === 'entrada' ? 'positivo' : 'negativo'}">
+                          ${entry.tipo === 'entrada' ? '+' : '-'}${entry.cantidad}
+                      </td>
+                      <td>${entry.comerciante || '-'}</td>
+                  </tr>
+              `).join('')}
+          </tbody>
+      </table>
+    `;
+  };
+
+  // Calcular resumen
+  const resumen = historial.reduce((acc, entry) => {
+    if (entry.tipo === 'entrada') {
+      acc.entradas += entry.cantidad;
+      acc.transaccionesEntrada++;
+    } else {
+      acc.salidas += entry.cantidad;
+      acc.transaccionesSalida++;
+    }
+    return acc;
+  }, { entradas: 0, salidas: 0, transaccionesEntrada: 0, transaccionesSalida: 0 });
+
+  return `
+    <div class="panel panel-full panel-comercio">
+        <h3>⚖️ Centro de Comercio</h3>
+        
+        <div class="comercio-resumen">
+            <div class="stat-comercio entrada">
+                <span class="stat-icono">📥</span>
+                <div class="stat-info">
+                    <span class="stat-label">Entradas</span>
+                    <span class="stat-value">${resumen.entradas} medidas</span>
+                    <small>${resumen.transaccionesEntrada} transacciones</small>
+                </div>
+            </div>
+            <div class="stat-comercio salida">
+                <span class="stat-icono">📤</span>
+                <div class="stat-info">
+                    <span class="stat-label">Salidas</span>
+                    <span class="stat-value">${resumen.salidas} medidas</span>
+                    <small>${resumen.transaccionesSalida} transacciones</small>
+                </div>
+            </div>
+            <div class="stat-comercio balance">
+                <span class="stat-icono">📊</span>
+                <div class="stat-info">
+                    <span class="stat-label">Balance</span>
+                    <span class="stat-value ${resumen.entradas - resumen.salidas >= 0 ? 'positivo' : 'negativo'}">
+                        ${resumen.entradas - resumen.salidas >= 0 ? '+' : ''}${resumen.entradas - resumen.salidas}
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        ${renderFormulario()}
+        
+        <hr class="separador-seccion">
+        
+        <h4>📜 Historial de Transacciones</h4>
+        ${renderHistorial()}
     </div>
     `;
 }
@@ -2806,6 +3584,73 @@ function agregarRecursoDesdeUI() {
     estadoSimulacion.almacen[recurso] = (estadoSimulacion.almacen[recurso] || 0) + cantidad;
     renderizarPantalla();
   }
+}
+
+function agregarComercioDesdeUI() {
+  const tipo = document.getElementById('comercio-tipo')?.value;
+  const recurso = document.getElementById('comercio-recurso')?.value;
+  const cantidad = parseInt(document.getElementById('comercio-cantidad')?.value) || 0;
+  const turno = parseInt(document.getElementById('comercio-turno')?.value) || 0;
+  const comerciante = document.getElementById('comercio-comerciante')?.value || '';
+
+  if (!recurso) {
+    alert("Selecciona un recurso");
+    return;
+  }
+
+  if (cantidad <= 0) {
+    alert("La cantidad debe ser mayor a 0");
+    return;
+  }
+
+  if (!estadoSimulacion) return;
+
+  // Inicializar almacen si no existe
+  if (!estadoSimulacion.almacen) estadoSimulacion.almacen = {};
+
+  // Aplicar efecto en almacenamiento (Doblones se manejan por separado)
+  if (recurso === 'Doblones') {
+    // Doblones: usar estadoSimulacion.doblones
+    if (tipo === 'entrada') {
+      estadoSimulacion.doblones = (estadoSimulacion.doblones || 0) + cantidad;
+    } else if (tipo === 'salida') {
+      const actual = estadoSimulacion.doblones || 0;
+      if (actual < cantidad) {
+        alert(`No hay suficientes Doblones (${actual} disponibles)`);
+        return;
+      }
+      estadoSimulacion.doblones = actual - cantidad;
+    }
+  } else {
+    // Recursos normales: usar almacen
+    if (tipo === 'entrada') {
+      estadoSimulacion.almacen[recurso] = (estadoSimulacion.almacen[recurso] || 0) + cantidad;
+    } else if (tipo === 'salida') {
+      const actual = estadoSimulacion.almacen[recurso] || 0;
+      if (actual < cantidad) {
+        alert(`No hay suficiente ${recurso} en el almacén (${actual} disponibles)`);
+        return;
+      }
+      estadoSimulacion.almacen[recurso] = actual - cantidad;
+      if (estadoSimulacion.almacen[recurso] <= 0) {
+        delete estadoSimulacion.almacen[recurso];
+      }
+    }
+  }
+
+  // Registrar en historial con turno manual
+  if (typeof registrarComercio === 'function') {
+    registrarComercio(recurso, cantidad, tipo, comerciante, turno);
+  }
+
+  // Mostrar notificación
+  if (typeof mostrarNotificacion === 'function') {
+    const icono = tipo === 'entrada' ? '📥' : '📤';
+    mostrarNotificacion(`${icono} ${tipo === 'entrada' ? 'Entrada' : 'Salida'}: ${cantidad} ${recurso}`, 'exito');
+  }
+
+  // Actualizar pantalla
+  renderizarPantalla();
 }
 
 // =====================================================
@@ -3872,20 +4717,59 @@ function construirEdificio(nombre) {
 }
 
 function cambiarReceta(instanceId, nuevaReceta) {
-  const list = estadoApp.asentamiento.edificios || [];
-  const inst = list.find(e => (typeof e === 'string' ? false : e.id === instanceId));
+  console.log('cambiarReceta called:', instanceId, nuevaReceta);
+
+  const list = estadoApp.asentamiento?.edificios || [];
+  let inst = list.find(e => (typeof e === 'string' ? false : e.id === instanceId));
+
+  // Handle legacy format: "NombreEdificio_legacy_INDEX"
+  if (!inst && instanceId.includes('_legacy_')) {
+    const parts = instanceId.split('_legacy_');
+    const nombre = parts[0];
+    const idx = parseInt(parts[1]);
+
+    // Check if the item at that index is a string matching the name
+    if (list[idx] === nombre) {
+      // Convert legacy string to object
+      inst = {
+        id: `${nombre}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+        nombre: nombre,
+        grado: 1,
+        receta: null
+      };
+
+      // Replace the string with the object in the list
+      list[idx] = inst;
+
+      console.log('Converted legacy building to object:', inst);
+    }
+  }
+
+  console.log('Instance found:', inst);
 
   if (inst) {
-    inst.receta = nuevaReceta;
+    inst.receta = nuevaReceta || null;  // Ensure null if empty string
 
     // Sincronizar con el estado de simulación explícitamente
-    if (estadoSimulacion.edificiosEstado && estadoSimulacion.edificiosEstado[instanceId]) {
-      estadoSimulacion.edificiosEstado[instanceId].recetaActual = nuevaReceta;
-      estadoSimulacion.edificiosEstado[instanceId].activo = !!nuevaReceta;
+    if (!estadoSimulacion.edificiosEstado) {
+      estadoSimulacion.edificiosEstado = {};
     }
+
+    estadoSimulacion.edificiosEstado[inst.id] = {
+      grado: inst.grado || 1,
+      recetaActual: nuevaReceta || null,
+      activo: !!nuevaReceta
+    };
 
     guardarExpedicion();
     renderizarPantalla();
+
+    if (nuevaReceta) {
+      mostrarNotificacion(`🏭 Receta seleccionada`, 'info');
+    }
+  } else {
+    console.error('Instance not found for id:', instanceId);
+    mostrarNotificacion('⚠️ Error: No se encontró el edificio', 'error');
   }
 }
 

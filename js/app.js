@@ -181,6 +181,9 @@ function calcularEstadisticasTotales(asentamiento) {
 /**
  * Calcula los efectos de todos los edificios construidos
  */
+/**
+ * Calcula los efectos de todos los edificios construidos
+ */
 function calcularEfectosEdificios(edificiosConstruidos) {
     const efectos = {
         calidad: 0,
@@ -189,32 +192,63 @@ function calcularEfectosEdificios(edificiosConstruidos) {
         admin: 0
     };
 
-    edificiosConstruidos.forEach(nombreEdificio => {
+    edificiosConstruidos.forEach(item => {
+        const nombreEdificio = (typeof item === 'string') ? item : item.nombre;
         const edificio = EDIFICIOS[nombreEdificio];
-        if (!edificio || !edificio.datos) return;
+        if (!edificio) return;
 
-        const estado = estadoSimulacion?.edificiosEstado?.[nombreEdificio];
-        const grado = estado?.grado || 1;
-
-        // d[3] = calidad_base, d[4] = calidad_por_grado
-        const calidadBase = edificio.datos[3] || 0;
-        const calidadInc = edificio.datos[4] || 0;
-
-        // Fórmula especial para Ala Festiva: solo d[4] * grado
-        if (nombreEdificio === "Ala Festiva") {
-            efectos.calidad += calidadInc * grado;
-        } else {
-            efectos.calidad += calidadBase + (calidadInc * (grado - 1));
+        // Determinar grado
+        let grado = 1;
+        if (typeof item === 'object' && item.grado) {
+            grado = item.grado;
+        } else if (estadoSimulacion?.edificiosEstado) {
+            // Fallback para legacy strings o si estadoSimulacion tiene la info actualizada
+            const id = (typeof item === 'string') ? item : item.id;
+            const estado = estadoSimulacion.edificiosEstado[id] || estadoSimulacion.edificiosEstado[nombreEdificio];
+            if (estado) grado = estado.grado;
         }
 
-        // d[1] = almacen_base, d[2] = almacen_por_grado
-        const almBase = edificio.datos[1] || 0;
-        const almInc = edificio.datos[2] || 0;
-        efectos.almacenamiento += almBase + (grado * almInc);
+        // --- CALIDAD ---
+        if (edificio.efectos && (edificio.efectos.Calidad || edificio.efectos.CalidadPorGrado)) {
+            const base = edificio.efectos.Calidad || 0;
+            const perGrado = edificio.efectos.CalidadPorGrado || 0;
+            efectos.calidad += base + (perGrado * (grado - 1));
+        } else if (edificio.datos) {
+            // Legacy data
+            const calidadBase = edificio.datos[3] || 0;
+            const calidadInc = edificio.datos[4] || 0;
+            if (nombreEdificio === "Ala Festiva") {
+                efectos.calidad += calidadInc * grado;
+            } else {
+                efectos.calidad += calidadBase + (calidadInc * (grado - 1));
+            }
+        } else if (edificio.efectos && edificio.efectos.Calidad) {
+            // Caso simple solo base
+            efectos.calidad += edificio.efectos.Calidad;
+        }
 
-        // d[5] = ingreso_base
-        const ingresoBase = edificio.datos[5] || 0;
-        efectos.ingresos += ingresoBase;
+        // --- ALMACENAMIENTO ---
+        if (edificio.almacenamiento) {
+            // Si tiene propiedad directa
+            efectos.almacenamiento += edificio.almacenamiento * grado; // Asumiendo lineal por grado si no se especifica
+        } else if (edificio.datos) {
+            const almBase = edificio.datos[1] || 0;
+            const almInc = edificio.datos[2] || 0;
+            efectos.almacenamiento += almBase + (grado * almInc);
+        } else if (edificio.efectos && edificio.efectos.Almacenamiento) {
+            efectos.almacenamiento += edificio.efectos.Almacenamiento; // Fixed value if simple effect
+        }
+
+        // --- INGRESOS ---
+        if (edificio.datos) {
+            const ingresoBase = edificio.datos[5] || 0;
+            efectos.ingresos += ingresoBase;
+        }
+
+        // --- OTROS EFECTOS ---
+        if (edificio.efectos) {
+            if (edificio.efectos.CapacidadAdmin) efectos.admin += edificio.efectos.CapacidadAdmin;
+        }
     });
 
     return efectos;

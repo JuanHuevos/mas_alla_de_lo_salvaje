@@ -40,7 +40,7 @@ let estadoSimulacion = {
     historialTurnos: [],
     // Construcciones en progreso: [{ id, nombre, turnosRestantes, turnosTotales, poblacionAsignada, costoOpcion }]
     construccionesEnProgreso: [],
-    // Historial de comercio: [{ turno, recurso, cantidad, tipo: 'compra'|'venta', precio }]
+    // Historial de comercio: [{ turno, recurso, cantidad, tipo: 'entrada'|'salida', comerciante }]
     historialComercio: []
 };
 
@@ -175,17 +175,18 @@ function calcularExtraccionPasiva(recurso, abundancia, modPropiedades) {
 
 /**
  * Calcula la producción activa de un recurso (con trabajadores asignados)
- * Fórmula: Mod_Abundancia + Mod_Propiedades + NumTrabajadores + 2 + Calidad/5
+ * Fórmula: Mod_Abundancia + Mod_Propiedades + 2 + (trabajadores adicionales) + Calidad/5
+ * El primer trabajador produce 2, cada trabajador adicional produce 1
  * (No se multiplica por 10, el resultado son Medidas directas)
  */
 function calcularExtraccionActiva(recurso, abundancia, modPropiedades, calidad, numTrabajadores) {
     const modAbundancia = NIVELES_ABUNDANCIA[abundancia]?.modificador ?? 0;
 
-    // (-1 de base pasiva se quita, en su lugar se suma +2 por ser activa)
-    // +1 por cada cuota trabajando (numTrabajadores)
-    // + Calidad / 5
+    // Primer trabajador produce 2, cada adicional produce 1
+    // Eso equivale a: 2 + (numTrabajadores - 1) = numTrabajadores + 1
+    // + Mod_Abundancia + Mod_Propiedades + Calidad / 5
 
-    const base = modAbundancia + modPropiedades + numTrabajadores + 2 + (calidad / 5);
+    const base = modAbundancia + modPropiedades + numTrabajadores + 1 + (calidad / 5);
 
     const produccionTotal = Math.floor(base);
 
@@ -196,25 +197,47 @@ function calcularExtraccionActiva(recurso, abundancia, modPropiedades, calidad, 
  * Calcula la producción total de todos los recursos
  * @param {object} recursos - { nombreRecurso: { abundancia, modPropiedades } }
  * @param {number} calidad - Calidad total del asentamiento
+ * @param {object} bonificaciones - { "nombreRecurso": valor } bonificadores de peculiaridades/propiedades
  */
-function calcularProduccionTotal(recursos, calidad) {
+function calcularProduccionTotal(recursos, calidad, bonificaciones = {}) {
     const produccion = {};
 
     Object.entries(recursos).forEach(([nombre, data]) => {
         const trabajadores = obtenerTrabajadoresRecurso(nombre);
         const numTrabajadores = trabajadores.length;
 
+        // modPropiedades base del recurso + bonificadores de peculiaridades/propiedades
+        let modTotal = data.modPropiedades || 0;
+
+        // Aplicar bonificaciones específicas del recurso
+        if (bonificaciones[nombre]) {
+            modTotal += bonificaciones[nombre];
+        }
+
+        // Aplicar bonificaciones con "Cualquier" (ej: "Cualquier pesca: +1")
+        Object.entries(bonificaciones).forEach(([key, valor]) => {
+            if (key.startsWith('Cualquier ')) {
+                const tipo = key.replace('Cualquier ', '').toLowerCase();
+                if (nombre.toLowerCase().includes(tipo)) {
+                    modTotal += valor;
+                }
+            }
+        });
+
         if (numTrabajadores > 0) {
             produccion[nombre] = {
                 tipo: "activa",
-                medidas: calcularExtraccionActiva(nombre, data.abundancia, data.modPropiedades || 0, calidad, numTrabajadores),
+                medidas: calcularExtraccionActiva(nombre, data.abundancia, modTotal, calidad, numTrabajadores),
                 trabajadores: numTrabajadores
             };
         } else {
+            // Recursos exóticos NO tienen producción pasiva - solo activa con trabajadores
+            const esExotico = data.esExotico === true;
             produccion[nombre] = {
                 tipo: "pasiva",
-                medidas: calcularExtraccionPasiva(nombre, data.abundancia, data.modPropiedades || 0),
-                trabajadores: 0
+                medidas: esExotico ? 0 : calcularExtraccionPasiva(nombre, data.abundancia, modTotal),
+                trabajadores: 0,
+                esExotico: esExotico
             };
         }
     });
@@ -831,16 +854,17 @@ function avanzarConstrucciones(asentamiento) {
  * Registra una transacción comercial
  * @param {string} recurso - Nombre del recurso
  * @param {number} cantidad - Cantidad intercambiada
- * @param {string} tipo - 'compra' o 'venta'
- * @param {number} precio - Precio en doblones (opcional)
+ * @param {string} tipo - 'entrada' o 'salida'
+ * @param {string} comerciante - Nombre del comerciante (opcional)
+ * @param {number} turno - Turno en que ocurrió (opcional, usa turno actual si no se especifica)
  */
-function registrarComercio(recurso, cantidad, tipo, precio = 0) {
+function registrarComercio(recurso, cantidad, tipo, comerciante = '', turno = null) {
     estadoSimulacion.historialComercio.push({
-        turno: estadoSimulacion.turno,
+        turno: turno !== null ? turno : estadoSimulacion.turno,
         recurso: recurso,
         cantidad: cantidad,
         tipo: tipo,
-        precio: precio
+        comerciante: comerciante
     });
 }
 
