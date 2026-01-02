@@ -94,10 +94,17 @@ function btnPasarTurno() {
 }
 
 function btnDeshacerTurno() {
-  if (deshacerTurno()) {
+  const resultado = deshacerTurno();
+
+  if (resultado && resultado.success) {
     // Update settlement simulation state
     const asentamientoActual = obtenerAsentamientoActual();
     if (asentamientoActual) {
+      // Restaurar los edificios del asentamiento si fueron guardados en el snapshot
+      if (resultado.asentamientoEdificios) {
+        asentamientoActual.edificios = resultado.asentamientoEdificios;
+      }
+
       asentamientoActual.simulacion = JSON.parse(JSON.stringify(estadoSimulacion));
       guardarExpedicion();
     }
@@ -2431,6 +2438,16 @@ function renderizarHUD(container) {
               <span class="qs-value ${calidad >= 0 ? 'positivo' : 'negativo'}">${calidad >= 0 ? '+' : ''}${calidad}</span>
               <span class="qs-label">Calidad</span>
             </div>
+            <div class="quick-stat" title="Ideas acumuladas">
+              <span class="qs-icon">💡</span>
+              <span class="qs-value">${estadoSimulacion?.ideas || 0}</span>
+              <span class="qs-label">Ideas</span>
+            </div>
+            <div class="quick-stat" title="Puntos de Devoción">
+              <span class="qs-icon">🙏</span>
+              <span class="qs-value">${estadoSimulacion?.devocion || 0}</span>
+              <span class="qs-label">Devoción</span>
+            </div>
           </div>
         </div>
         
@@ -3167,7 +3184,297 @@ function renderizarPestanaDiplomacia(a, stats) {
 }
 
 function renderizarPestanaDevocion(a, stats) {
-  return `<div class="panel panel-full"><h3>🙏 Devoción</h3><div class="panel-contenido"><p>En construcción...</p></div></div>`;
+  // Inicializar estado de devoción si no existe
+  if (!estadoSimulacion.estadoDevocion) {
+    estadoSimulacion.estadoDevocion = {
+      poolPorTipo: { Positiva: 0, Negativa: 0, Neutral: 0, Salvaje: 0 },
+      isSyncretic: false,
+      syncreticTypes: [],
+      dominantType: null,
+      sacrilegio: false,
+      turnosSacrilegio: 0
+    };
+  }
+
+  const devocion = estadoSimulacion.estadoDevocion;
+  const tiposDevocion = ["Positiva", "Negativa", "Neutral", "Salvaje"];
+
+  // Contar devotos por tipo de naturaleza
+  const devotosPorTipo = { Positiva: 0, Negativa: 0, Neutral: 0, Salvaje: 0 };
+  let totalDevotos = 0;
+
+  if (estadoSimulacion.poblacion) {
+    estadoSimulacion.poblacion.forEach(cuota => {
+      if (cuota.rol === "Devoto") {
+        // La naturaleza de la cuota determina el tipo de devoción
+        const tipoNat = cuota.naturaleza || "Neutral";
+        // Mapear naturaleza a tipo de devoción (Monstruo y Artificial no generan devoción)
+        if (tipoNat === "Positiva" || tipoNat === "Negativa" || tipoNat === "Neutral") {
+          devotosPorTipo[tipoNat] = (devotosPorTipo[tipoNat] || 0) + 1;
+          totalDevotos++;
+        } else if (tipoNat === "Monstruo") {
+          // Monstruos generan devoción Salvaje
+          devotosPorTipo["Salvaje"] = (devotosPorTipo["Salvaje"] || 0) + 1;
+          totalDevotos++;
+        }
+      }
+    });
+  }
+
+  // Detectar tipos activos
+  const tiposActivos = tiposDevocion.filter(t => devotosPorTipo[t] > 0 || devocion.poolPorTipo[t] > 0);
+
+  // Detectar sacrilegio (tipos opuestos activos)
+  let haySacrilegio = false;
+  if ((devotosPorTipo["Positiva"] > 0 && devotosPorTipo["Negativa"] > 0) ||
+    (devotosPorTipo["Neutral"] > 0 && devotosPorTipo["Salvaje"] > 0)) {
+    haySacrilegio = true;
+  }
+  devocion.sacrilegio = haySacrilegio;
+
+  // Determinar tipo dominante
+  let maxDevotos = 0;
+  let dominante = null;
+  tiposDevocion.forEach(t => {
+    if (devotosPorTipo[t] > maxDevotos) {
+      maxDevotos = devotosPorTipo[t];
+      dominante = t;
+    }
+  });
+  devocion.dominantType = dominante;
+
+  // Calcular grado de devoción
+  const gradoDevocion = typeof calcularGradoDevocion === 'function'
+    ? calcularGradoDevocion(totalDevotos)
+    : (totalDevotos >= 300 ? 3 : totalDevotos >= 60 ? 2 : 1);
+
+  // Verificar si hay Plaza de Adoración
+  const tienePlazaAdoracion = (a.edificios || []).some(e => {
+    const nombre = typeof e === 'string' ? e : e.nombre;
+    return nombre === "Plaza de Adoración" || nombre === "Sitio Sagrado" || nombre === "Templo";
+  });
+
+  // Calcular modificador de coste de milagros
+  let modCoste = 0;
+  if (haySacrilegio) modCoste += 20;
+  if (devocion.isSyncretic) modCoste -= 20;
+
+  // Estado visual
+  let estadoLabel = "Estable";
+  let estadoColor = "#4a9eff";
+  let estadoIcono = "✅";
+  if (haySacrilegio) {
+    estadoLabel = "⚠️ SACRILEGIO";
+    estadoColor = "#ff4444";
+    estadoIcono = "💀";
+  } else if (devocion.isSyncretic) {
+    estadoLabel = "Sincretismo Activo";
+    estadoColor = "#44ff88";
+    estadoIcono = "🤝";
+  }
+
+  // Contar plebeyos disponibles para conversión
+  const plebeyosDisponibles = estadoSimulacion.poblacion?.filter(c => c.rol === "Plebeyo").length || 0;
+
+  return `
+    <div class="panel panel-full" style="margin-bottom:1rem;">
+      <h3>🙏 Sistema de Devoción</h3>
+      <div class="panel-contenido">
+        
+        <!-- ============ PANEL A: RESUMEN DE FE ============ -->
+        <div style="background:rgba(255,255,255,0.05); padding:1rem; border-radius:8px; margin-bottom:1rem;">
+          <h4 style="margin-top:0;">📊 Resumen de Fe</h4>
+          
+          <!-- Estado e Indicadores -->
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="background:${estadoColor}; color:#fff; padding:0.4rem 0.8rem; border-radius:4px; font-weight:bold;">
+                ${estadoIcono} ${estadoLabel}
+              </span>
+              <span style="opacity:0.7;">Grado de Fe: <strong>${gradoDevocion}</strong></span>
+            </div>
+            <div>
+              <span style="opacity:0.7;">Devotos Totales: </span>
+              <strong style="font-size:1.2rem;">${totalDevotos}</strong>
+            </div>
+          </div>
+
+          ${haySacrilegio ? `
+            <div style="background:rgba(255,0,0,0.15); padding:0.8rem; border-radius:6px; margin-bottom:1rem; border-left:3px solid #ff4444;">
+              <strong>⚠️ Penalizaciones de Sacrilegio:</strong>
+              <ul style="margin:0.5rem 0 0 1rem; padding:0;">
+                <li>Coste de Milagros: +20</li>
+                <li>Conversiones Forzadas cada 3 Cuotas de Devotos</li>
+                <li>-1 Calidad por cada Devoción contraria</li>
+              </ul>
+            </div>
+          ` : ''}
+
+          ${devocion.isSyncretic ? `
+            <div style="background:rgba(0,255,100,0.1); padding:0.8rem; border-radius:6px; margin-bottom:1rem; border-left:3px solid #44ff88;">
+              <strong>🤝 Sincretismo Activo:</strong> ${devocion.syncreticTypes.join(' + ')}
+              <br><small>Coste de Milagros: -20</small>
+            </div>
+          ` : ''}
+
+          <!-- Distribución por Tipo -->
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">
+            ${tiposDevocion.map(tipo => {
+    const tipoData = typeof TIPOS_DEVOCION !== 'undefined' ? TIPOS_DEVOCION[tipo] : null;
+    const icono = tipoData?.icono || "⚪";
+    const color = tipoData?.color || "#666";
+    const cuotas = devotosPorTipo[tipo] || 0;
+    const pool = devocion.poolPorTipo[tipo] || 0;
+    const porcentajePool = Math.min(100, pool);
+
+    if (cuotas === 0 && pool === 0) return '';
+
+    return `
+                <div style="background:rgba(255,255,255,0.05); padding:0.8rem; border-radius:6px; border-left:3px solid ${color};">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                    <span>${icono} <strong>${tipo}</strong></span>
+                    <span style="opacity:0.7;">${cuotas} devotos</span>
+                  </div>
+                  <div style="background:rgba(0,0,0,0.3); border-radius:4px; height:12px; overflow:hidden;">
+                    <div style="width:${porcentajePool}%; height:100%; background:${color}; transition:width 0.3s;"></div>
+                  </div>
+                  <div style="display:flex; justify-content:space-between; font-size:0.8rem; opacity:0.7; margin-top:0.2rem;">
+                    <span>Pool: ${pool}/100</span>
+                    <span>+${cuotas}/turno</span>
+                  </div>
+                </div>
+              `;
+  }).join('')}
+          </div>
+
+          ${tiposActivos.length === 0 ? `
+            <p style="text-align:center; opacity:0.6; margin:1rem 0;">No hay devociones activas. Convierte Plebeyos a Devotos para comenzar.</p>
+          ` : ''}
+        </div>
+
+        <!-- ============ PANEL B: GESTIÓN DE CULTO ============ -->
+        <div style="background:rgba(255,255,255,0.05); padding:1rem; border-radius:8px; margin-bottom:1rem;">
+          <h4 style="margin-top:0;">⛪ Gestión de Culto</h4>
+          
+          ${!tienePlazaAdoracion ? `
+            <div style="background:rgba(255,165,0,0.15); padding:0.8rem; border-radius:6px; margin-bottom:1rem; border-left:3px solid #ffa500;">
+              🔒 <strong>Requisito:</strong> Construye una "Plaza de Adoración" o "Sitio Sagrado" para habilitar Devotos.
+            </div>
+          ` : `
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:15px;">
+              
+              <!-- Conversor Plebeyo → Devoto -->
+              <div style="background:rgba(0,0,0,0.2); padding:1rem; border-radius:6px;">
+                <h5 style="margin:0 0 0.8rem 0;">🙏 Convertir a Devoto</h5>
+                <p style="font-size:0.85rem; opacity:0.7; margin-bottom:0.8rem;">
+                  Transforma Plebeyos en Devotos para generar puntos de Devoción.
+                </p>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                  <select id="select-tipo-devoto" style="padding:0.4rem; background:#333; color:#fff; border:1px solid #555; border-radius:4px;">
+                    ${tiposDevocion.map(t => {
+    const tipoData = typeof TIPOS_DEVOCION !== 'undefined' ? TIPOS_DEVOCION[t] : null;
+    return `<option value="${t}">${tipoData?.icono || ''} ${t}</option>`;
+  }).join('')}
+                  </select>
+                  <button onclick="convertirPlebeyoADevoto()" 
+                          style="padding:0.5rem 1rem; background:#9932CC; color:#fff; border:none; border-radius:4px; cursor:pointer;"
+                          ${plebeyosDisponibles === 0 ? 'disabled style="opacity:0.5;"' : ''}>
+                    Convertir 1 Plebeyo
+                  </button>
+                </div>
+                <small style="opacity:0.6; display:block; margin-top:0.5rem;">
+                  Plebeyos disponibles: ${plebeyosDisponibles}
+                </small>
+              </div>
+
+              <!-- Sincretismo -->
+              <div style="background:rgba(0,0,0,0.2); padding:1rem; border-radius:6px;">
+                <h5 style="margin:0 0 0.8rem 0;">🤝 Pacto Sincrético</h5>
+                <p style="font-size:0.85rem; opacity:0.7; margin-bottom:0.8rem;">
+                  Une dos devociones compatibles para reducir costes de milagros.
+                </p>
+                ${haySacrilegio ? `
+                  <p style="color:#ff6666; font-size:0.85rem;">❌ No disponible durante Sacrilegio</p>
+                ` : tiposActivos.length < 2 ? `
+                  <p style="opacity:0.6; font-size:0.85rem;">Requiere 2 devociones activas no opuestas.</p>
+                ` : devocion.isSyncretic ? `
+                  <button onclick="romperSincretismo()" 
+                          style="padding:0.5rem 1rem; background:#aa3333; color:#fff; border:none; border-radius:4px; cursor:pointer;">
+                    Romper Sincretismo
+                  </button>
+                ` : `
+                  <button onclick="pactarSincretismo()" 
+                          style="padding:0.5rem 1rem; background:#228b22; color:#fff; border:none; border-radius:4px; cursor:pointer;">
+                    Pactar Sincretismo
+                  </button>
+                `}
+              </div>
+            </div>
+          `}
+        </div>
+
+        <!-- ============ PANEL C: LIBRO DE MILAGROS ============ -->
+        <div style="background:rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+          <h4 style="margin-top:0;">📖 Libro de Milagros</h4>
+          
+          ${totalDevotos === 0 ? `
+            <p style="text-align:center; opacity:0.6;">Necesitas al menos 1 Devoto para acceder a los milagros.</p>
+          ` : `
+            <div style="margin-bottom:1rem;">
+              <small style="opacity:0.7;">
+                Grado actual: <strong>${gradoDevocion}</strong> | 
+                Modificador de coste: <strong style="color:${modCoste > 0 ? '#ff6666' : modCoste < 0 ? '#66ff66' : '#fff'};">${modCoste >= 0 ? '+' : ''}${modCoste}</strong>
+              </small>
+            </div>
+
+            ${tiposActivos.map(tipo => {
+    const tipoData = typeof TIPOS_DEVOCION !== 'undefined' ? TIPOS_DEVOCION[tipo] : null;
+    const milagrosTipo = typeof MILAGROS !== 'undefined' ? MILAGROS[tipo] : {};
+    const pool = devocion.poolPorTipo[tipo] || 0;
+
+    if (!milagrosTipo || Object.keys(milagrosTipo).length === 0) return '';
+
+    return `
+                <details style="margin-bottom:0.5rem;">
+                  <summary style="cursor:pointer; padding:0.5rem; background:rgba(255,255,255,0.05); border-radius:4px; border-left:3px solid ${tipoData?.color || '#666'};">
+                    ${tipoData?.icono || ''} <strong>${tipo}</strong> <small>(Pool: ${pool}/100)</small>
+                  </summary>
+                  <div style="padding:0.5rem; display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:10px; margin-top:0.5rem;">
+                    ${Object.entries(milagrosTipo).map(([nombre, milagro]) => {
+      const costeAjustado = milagro.coste + modCoste;
+      const puedeInvocar = pool >= costeAjustado && milagro.grado <= gradoDevocion;
+      const gradoInsuficiente = milagro.grado > gradoDevocion;
+
+      return `
+                        <div style="background:rgba(0,0,0,0.2); padding:0.8rem; border-radius:6px; opacity:${gradoInsuficiente ? '0.5' : '1'};">
+                          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:0.3rem;">
+                            <strong style="font-size:0.95rem;">${nombre}</strong>
+                            <span style="background:${puedeInvocar ? '#228b22' : '#666'}; padding:0.2rem 0.5rem; border-radius:3px; font-size:0.8rem;">
+                              ${costeAjustado} pts
+                            </span>
+                          </div>
+                          <div style="font-size:0.75rem; opacity:0.6; margin-bottom:0.5rem;">
+                            Grado ${milagro.grado} | ${milagro.objetivo || 'general'}
+                          </div>
+                          <p style="font-size:0.85rem; margin:0 0 0.5rem 0; opacity:0.9;">${milagro.efecto}</p>
+                          <button onclick="invocarMilagro('${tipo}', '${nombre}')"
+                                  style="width:100%; padding:0.4rem; background:${puedeInvocar ? tipoData?.color || '#4a9eff' : '#444'}; color:#fff; border:none; border-radius:4px; cursor:${puedeInvocar ? 'pointer' : 'not-allowed'}; font-size:0.85rem;"
+                                  ${!puedeInvocar ? 'disabled' : ''}>
+                            ${gradoInsuficiente ? '🔒 Grado insuficiente' : puedeInvocar ? '✨ Invocar' : '❌ Sin puntos'}
+                          </button>
+                        </div>
+                      `;
+    }).join('')}
+                  </div>
+                </details>
+              `;
+  }).join('')}
+          `}
+        </div>
+
+      </div>
+    </div>
+  `;
 }
 
 /**
@@ -3176,12 +3483,14 @@ function renderizarPestanaDevocion(a, stats) {
 function renderizarTablaPoblacionEditable() {
   const tiposPoblacion = ["Neutral", "Positiva", "Negativa", "Monstruo", "Artificial"];
   const iconosTipo = { Neutral: "⚪", Positiva: "🌟", Negativa: "🌑", Monstruo: "👹", Artificial: "🤖" };
-  const roles = ["Académicos", "Especiales", "Soldados", "Artesanos", "Plebeyos", "Esclavos"];
-  const iconosRol = { Académicos: "📚", Especiales: "✨", Soldados: "⚔️", Artesanos: "🔨", Plebeyos: "👷", Esclavos: "⛓️" };
+  // Usar los nombres exactos de ROLES_POBLACION (singular)
+  const roles = Object.keys(ROLES_POBLACION);
+  const iconosRol = {};
+  roles.forEach(r => iconosRol[r] = ROLES_POBLACION[r]?.icono || '👤');
 
   if (!estadoSimulacion?.poblacion || estadoSimulacion.poblacion.length === 0) {
     return `<p style="text-align:center; opacity:0.6;">No hay población.</p>
-            <button onclick="agregarCuotaPoblacion('Neutral','Plebeyos')" style="background:rgba(100,200,100,0.2); border:1px solid rgba(100,200,100,0.5); color:#fff; padding:0.4rem 0.8rem; border-radius:6px; cursor:pointer; margin-top:1rem;">➕ Agregar Cuota</button>`;
+            <button onclick="agregarCuotaPoblacion('Neutral','Plebeyo')" style="background:rgba(100,200,100,0.2); border:1px solid rgba(100,200,100,0.5); color:#fff; padding:0.4rem 0.8rem; border-radius:6px; cursor:pointer; margin-top:1rem;">➕ Agregar Cuota</button>`;
   }
 
   let html = `<table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
@@ -3290,10 +3599,19 @@ function renderizarPestanaPoblacion(a, stats) {
   const tipoInmigracionActual = estadoSimulacion.tipoInmigracion || "Neutral";
 
   // Balance alimentos (solo poblaciones que consumen)
+  // Sumar TODOS los tipos de alimento: Alimento, Frutos y Tubérculos, Carne, Pesca
   const recursos = a.recursos || {};
   const produccionBioma = calcularProduccionTotal(recursos, stats.calidadTotal);
   const produccionEdificios = calcularProduccionEdificios(a.edificios || [], stats);
-  const prodAlimento = (produccionBioma["Alimento"]?.medidas || 0) + (produccionEdificios["Alimento"]?.total || 0);
+
+  // Tipos de alimento a considerar (en orden de prioridad de consumo)
+  const tiposAlimento = ["Alimento", "Frutos y Tubérculos", "Carne", "Pesca"];
+  let prodAlimentoTotal = 0;
+
+  tiposAlimento.forEach(tipo => {
+    prodAlimentoTotal += produccionBioma[tipo]?.medidas || 0;
+    prodAlimentoTotal += produccionEdificios[tipo]?.total || 0;
+  });
 
   // Solo cuentan las poblaciones que consumen alimentos
   const cuotasQueConsumen = estadoSimulacion.poblacion?.filter(c => {
@@ -3302,7 +3620,7 @@ function renderizarPestanaPoblacion(a, stats) {
   }).length || 0;
 
   const consumo = cuotasQueConsumen;
-  const balanceAlimentos = prodAlimento - consumo;
+  const balanceAlimentos = prodAlimentoTotal - consumo;
   const puedeReproducir = balanceAlimentos >= 0;
 
   // Pendientes por tipo
@@ -3310,16 +3628,15 @@ function renderizarPestanaPoblacion(a, stats) {
   const metaConsolidacion = CONVERSION.CUOTA_POBLACION;
 
   // Reproducción por tipo (estimación para UI, respetando puedeReproducir de cada naturaleza)
+  // Reproducción = 1 por cada cuota de población (sin importar rol)
   const reproduccionPorTipo = {};
   if (puedeReproducir && estadoSimulacion.poblacion) {
     estadoSimulacion.poblacion.forEach(c => {
-      if (c.rol === "Plebeyo") {
-        const t = c.naturaleza || "Neutral";
-        const nat = NATURALEZAS_POBLACION?.[t];
-        // Solo reproduce si la naturaleza lo permite
-        if (nat?.puedeReproducir !== false) {
-          reproduccionPorTipo[t] = (reproduccionPorTipo[t] || 0) + 1;
-        }
+      const t = c.naturaleza || "Neutral";
+      const nat = NATURALEZAS_POBLACION?.[t];
+      // Solo reproduce si la naturaleza lo permite
+      if (nat?.puedeReproducir !== false) {
+        reproduccionPorTipo[t] = (reproduccionPorTipo[t] || 0) + 1;
       }
     });
   }
@@ -3423,8 +3740,16 @@ function renderizarPestanaPoblacion(a, stats) {
                                     <div class="barra-fill" style="width:${porcentaje}%; background:${porcentaje >= 100 ? '#4f4' : '#4a9eff'};"></div>
                                 </div>
                             </div>
-                            <div style="display:flex; justify-content:space-between; font-size:0.8rem; opacity:0.7; margin-top:0.2rem;">
-                                <span>${pendiente} / ${metaConsolidacion}</span>
+                            <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; opacity:0.7; margin-top:0.2rem;">
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <span>${pendiente} / ${metaConsolidacion}</span>
+                                    <div class="btn-group-sm" style="margin-left:8px;">
+                                        <button onclick="modificarProgresionPoblacion('${tipo}', -10)" ${pendiente < 10 ? 'disabled' : ''} title="-10">--</button>
+                                        <button onclick="modificarProgresionPoblacion('${tipo}', -1)" ${pendiente <= 0 ? 'disabled' : ''} title="-1">-</button>
+                                        <button onclick="modificarProgresionPoblacion('${tipo}', 1)" title="+1">+</button>
+                                        <button onclick="modificarProgresionPoblacion('${tipo}', 10)" title="+10">++</button>
+                                    </div>
+                                </div>
                                 ${pendiente >= metaConsolidacion ? '<span style="color:#4f4;">✨ ¡Nueva cuota lista!</span>' : ''}
                             </div>
                         </div>
@@ -3542,6 +3867,23 @@ function modificarCantidadRecurso(recurso, delta) {
   if (estadoSimulacion.almacen[recurso] <= 0) {
     delete estadoSimulacion.almacen[recurso];
   }
+  renderizarPantalla();
+}
+
+// Helper para modificar la progresión de crecimiento poblacional por tipo
+function modificarProgresionPoblacion(tipo, delta) {
+  if (!estadoSimulacion) return;
+
+  if (!estadoSimulacion.inmigracionPendientePorTipo) {
+    estadoSimulacion.inmigracionPendientePorTipo = {
+      Neutral: 0, Positiva: 0, Negativa: 0, Monstruo: 0, Artificial: 0
+    };
+  }
+
+  const actual = estadoSimulacion.inmigracionPendientePorTipo[tipo] || 0;
+  const nuevo = Math.max(0, actual + delta);
+  estadoSimulacion.inmigracionPendientePorTipo[tipo] = nuevo;
+
   renderizarPantalla();
 }
 
@@ -3800,10 +4142,13 @@ function renderizarSubPestanaBalance(a, stats) {
   const poblacionTributable = Math.min(totalCuotas, limiteAdmin);
   const ingresosTributo = poblacionTributable * tributoData.doblones;
 
+  // Ingresos de edificios (ej: Mercado)
+  const ingresosEdificios = produccionEdificios["Doblones"]?.total || 0;
+
   // Mantenimiento - usar el valor precalculado que aplica modificadores correctamente
   const gastoMantenimiento = stats.mantenimientoEdificios || 0;
 
-  const balanceDoblones = ingresosTributo - gastoMantenimiento;
+  const balanceDoblones = ingresosTributo + ingresosEdificios - gastoMantenimiento;
 
   // Recopilar todos los recursos con producción
   const recursosConProduccion = new Set();
@@ -3860,6 +4205,7 @@ function renderizarSubPestanaBalance(a, stats) {
                 <h5>Balance de Doblones</h5>
                 <div class="balance-desglose">
                     <span>Tributos: <strong>+${ingresosTributo}</strong></span>
+                    ${ingresosEdificios > 0 ? `<span>Edificios: <strong>+${ingresosEdificios}</strong></span>` : ''}
                     <span>Mantenimiento: <strong>-${gastoMantenimiento}</strong></span>
                 </div>
             </div>
@@ -4531,7 +4877,13 @@ function checkCostAffordability(costBlock, multiplier = 10) {
       const tag = recurso.replace('Cualquier ', '');
       disponible = calcularRecursosPorTag(tag);
     } else {
+      // Primero buscar el recurso por nombre exacto
       disponible = (estadoSimulacion.almacen && estadoSimulacion.almacen[recurso]) || 0;
+
+      // Si no hay suficiente, buscar también por tag (ej: "Piel" busca recursos con tag "Piel" como "Pieles")
+      if (disponible < cantidadReal) {
+        disponible += calcularRecursosPorTag(recurso);
+      }
     }
 
     if (disponible < cantidadReal) {
@@ -4559,13 +4911,48 @@ function consumeCostBlock(costBlock, multiplier = 10) {
       const tag = recurso.replace('Cualquier ', '');
       consumirRecursosPorTag(tag, cantidadReal);
     } else {
-      // Recurso específico
+      // Primero intentar consumir el recurso por nombre exacto
+      let porConsumir = cantidadReal;
+
       if (estadoSimulacion.almacen[recurso]) {
-        estadoSimulacion.almacen[recurso] -= cantidadReal;
+        const tomarDirecto = Math.min(estadoSimulacion.almacen[recurso], porConsumir);
+        estadoSimulacion.almacen[recurso] -= tomarDirecto;
+        porConsumir -= tomarDirecto;
         if (estadoSimulacion.almacen[recurso] <= 0) {
           delete estadoSimulacion.almacen[recurso];
         }
       }
+
+      // Si aún falta, consumir por tag (ej: "Piel" consume de recursos con tag "Piel" como "Pieles")
+      if (porConsumir > 0) {
+        consumirRecursosPorTag(recurso, porConsumir);
+      }
+    }
+  });
+}
+
+/**
+ * Devuelve recursos de un bloque de costos (reembolso al demoler).
+ * @param {Object} costBlock - Objeto con recursos y cantidades
+ * @param {number} multiplier - Multiplicador de costos
+ */
+function refundCostBlock(costBlock, multiplier = 10) {
+  if (!costBlock || typeof costBlock !== 'object') return;
+
+  Object.entries(costBlock).forEach(([recurso, cantidad]) => {
+    const cantidadReal = cantidad * multiplier;
+
+    if (recurso === 'Doblones') {
+      estadoSimulacion.doblones = (estadoSimulacion.doblones || 0) + cantidadReal;
+    } else if (recurso.startsWith('Cualquier ')) {
+      // Para recursos genéricos, devolver como el primer recurso de ese tag disponible
+      // o simplemente agregar doblones equivalentes (simplificación)
+      // Por ahora, agregamos doblones como compensación
+      estadoSimulacion.doblones = (estadoSimulacion.doblones || 0) + cantidadReal;
+    } else {
+      // Recurso específico
+      if (!estadoSimulacion.almacen) estadoSimulacion.almacen = {};
+      estadoSimulacion.almacen[recurso] = (estadoSimulacion.almacen[recurso] || 0) + cantidadReal;
     }
   });
 }
@@ -4644,15 +5031,16 @@ function asignarPoblacionEdificio(edificioId, delta, rolRequerido) {
 
   if (delta > 0) {
     // Find idle worker matching role
+    // Check for null, undefined, empty string, or 0 as "no assignment"
     const p = estadoSimulacion.poblacion.find(x =>
-      !x.asignacion &&
+      (!x.asignacion || x.asignacion === '' || x.asignacion === null) &&
       (!rolRequerido || rolRequerido === 'Cualquiera' || x.rol === rolRequerido)
     );
     if (p) {
       p.asignacion = token;
       actualizarHUD();
     } else {
-      mostrarNotificacion("No hay población ociosa (o con rol adecuado)", "error");
+      mostrarNotificacion(`No hay población ociosa con rol ${rolRequerido || 'Cualquiera'}`, "error");
     }
   } else {
     // Find worker assigned to this token
@@ -4774,7 +5162,8 @@ function renderizarPestanaEdificios(a, stats) {
              </div>
              <div class="edificio-body">
                  <div class="barra-progreso-container">
-                    <p class="progreso-texto">Puntos restantes: ${Math.max(0, c.turnosRestantes)} / ${c.turnosTotales}</p>
+                    <p class="progreso-texto" style="margin:0; padding:0.3rem 0;">Puntos restantes: ${Math.max(0, c.turnosRestantes)} / ${c.turnosTotales}</p>
+                    ${c.poblacionAsignada > 0 ? `<p style="font-size:0.8rem; color:#8f8; margin:0;">≈ ${Math.ceil(Math.max(0, c.turnosRestantes) / c.poblacionAsignada)} turno(s) restantes</p>` : `<p style="font-size:0.8rem; color:#fa0; margin:0;">⚠️ Asigna trabajadores para avanzar</p>`}
                  </div>
                  <div class="asignacion-poblacion">
                     <span class="label-trabajadores">👷 Trabajadores: ${c.poblacionAsignada}</span>
@@ -4786,6 +5175,9 @@ function renderizarPestanaEdificios(a, stats) {
                  <small style="color:#aaa; font-style:italic; display:block; margin-top:5px; font-size: 0.75rem;">
                     Cada trabajador avanza 1 punto por turno.
                  </small>
+                 <div class="accion-cancelar" style="margin-top:0.5rem; border-top:1px dashed #733; padding-top:0.5rem;">
+                    <button class="btn-cancelar-construccion" style="font-size:0.8rem; padding:0.4rem; background:#6b2020; color:#fff; border:1px solid #944; border-radius:4px; cursor:pointer; width:100%;" onclick="cancelarConstruccionEnProgreso('${c.id}')">❌ Cancelar y Reembolsar</button>
+                 </div>
              </div>
           </div>
          `;
@@ -4901,6 +5293,9 @@ function renderizarPestanaEdificios(a, stats) {
                                 <button class="btn-construir" style="font-size:0.8rem; padding:0.4rem;" onclick="mostrarPopupMejora('${instancia.id}')">🔼 Mejorar</button>
                              </div>`
           : ''}
+                        <div class="accion-demoler" style="margin-top:0.5rem; border-top:1px dashed #733; padding-top:0.5rem;">
+                            <button class="btn-demoler" style="font-size:0.8rem; padding:0.4rem; background:#6b2020; color:#fff; border:1px solid #944; border-radius:4px; cursor:pointer;" onclick="mostrarPopupDemoler('${instancia.id}')">🗑️ Demoler</button>
+                        </div>
                     </div>
                 </div>
             `;
@@ -4938,7 +5333,11 @@ function renderizarPestanaEdificios(a, stats) {
         const tag = k.replace('Cualquier ', '');
         disponible = calcularRecursosPorTag(tag);
       } else {
+        // Buscar por nombre exacto + fallback por tag
         disponible = (estadoSimulacion.almacen && estadoSimulacion.almacen[k]) || 0;
+        if (disponible < cantidadReal) {
+          disponible += calcularRecursosPorTag(k);
+        }
       }
       return `<span class="tag-coste ${disponible >= cantidadReal ? 'ok' : 'falta'}">${cantidadReal} ${label}</span>`;
     }).join('<span class="separador-mas">+</span>');
@@ -5540,7 +5939,9 @@ function mostrarPopupMejora(instanciaId) {
 
   popupMejoraActivo = instancia.id;
   const costesMejora = edificio.costesMejora || [];
-  const MULTIPLICADOR = 10;
+  const gradoActual = instancia.grado || 1;
+  const gradoObjetivo = gradoActual + 1; // El grado AL QUE se está mejorando
+  const MULTIPLICADOR = 10 * gradoObjetivo; // Coste = base × 10 × grado objetivo
 
   const opcionesConEstado = costesMejora.map((coste, idx) => {
     const asequible = checkCostAffordability(coste, MULTIPLICADOR).length === 0;
@@ -5557,7 +5958,9 @@ function mostrarPopupMejora(instanciaId) {
         const tag = recurso.replace('Cualquier ', '');
         disponible = calcularRecursosPorTag(tag);
       } else {
+        // Buscar por nombre exacto + fallback por tag
         disponible = (estadoSimulacion.almacen && estadoSimulacion.almacen[recurso]) || 0;
+        disponible += calcularRecursosPorTag(recurso);
       }
       const suficiente = disponible >= real;
       return `<span class="recurso-coste ${suficiente ? 'ok' : 'falta'}">${real} ${recurso} (${disponible})</span>`;
@@ -5629,7 +6032,9 @@ function confirmarMejora() {
   if (!edificio) return;
 
   const costesMejora = edificio.costesMejora || [];
-  const MULTIPLICADOR = 10;
+  const gradoActual = instancia.grado || 1;
+  const gradoObjetivo = gradoActual + 1; // El grado AL QUE se está mejorando
+  const MULTIPLICADOR = 10 * gradoObjetivo; // Coste = base × 10 × grado objetivo
 
   const selectedRadio = document.querySelector('input[name="opcionCosteMejora"]:checked');
   let opcionElegida = null;
@@ -5667,6 +6072,440 @@ function confirmarMejora() {
   cerrarPopupMejora();
   actualizarHUD();
   mostrarNotificacion(`🏗️ Mejora iniciada para ${instancia.nombre}`);
+}
+
+// =====================================================
+// POPUP DE DEMOLICIÓN - Deshacer Construcciones
+// =====================================================
+
+let popupDemolerActivo = null;
+
+function mostrarPopupDemoler(instanciaId) {
+  let instancia = (estadoApp.asentamiento.edificios || []).find(e => (typeof e !== 'string' && e.id === instanciaId));
+
+  // Handle Legacy Strings Conversion
+  if (!instancia && instanciaId.includes('_legacy_')) {
+    const parts = instanciaId.split('_legacy_');
+    const name = parts[0];
+    const idx = parseInt(parts[1]);
+
+    if (estadoApp.asentamiento.edificios && estadoApp.asentamiento.edificios[idx] === name) {
+      instancia = {
+        id: instanciaId,
+        nombre: name,
+        grado: 1,
+        receta: null
+      };
+    }
+  }
+
+  if (!instancia) {
+    console.error('Instancia no encontrada para demoler:', instanciaId);
+    mostrarNotificacion('⚠️ Error: Edificio no encontrado', 'error');
+    return;
+  }
+
+  const edificio = EDIFICIOS[instancia.nombre];
+  if (!edificio) {
+    mostrarNotificacion('⚠️ Error: Definición de edificio no encontrada', 'error');
+    return;
+  }
+
+  popupDemolerActivo = instanciaId;
+
+  // Obtener el coste original del edificio (primera opción disponible)
+  const costesG1 = edificio.costesG1 || [];
+  const MULTIPLICADOR = 10;
+
+  // Calcular recursos a devolver (primera opción de coste como referencia)
+  let recursosADevolver = '';
+  if (costesG1.length > 0) {
+    const primerCoste = costesG1[0];
+    recursosADevolver = Object.entries(primerCoste).map(([recurso, cantidad]) => {
+      const cantidadReal = cantidad * MULTIPLICADOR;
+      return `<span class="recurso-refund">${cantidadReal} ${recurso}</span>`;
+    }).join(' + ');
+  } else {
+    recursosADevolver = '<span class="sin-coste">Sin recursos a devolver</span>';
+  }
+
+  // Contar trabajadores asignados
+  let trabajadoresAsignados = 0;
+  const tokenId = `edificio_id:${instanciaId}`;
+  const tokenNombre = `edificio:${instancia.nombre}`;
+
+  if (estadoSimulacion.poblacion) {
+    trabajadoresAsignados = estadoSimulacion.poblacion.filter(p =>
+      p.asignacion === tokenId || p.asignacion === tokenNombre
+    ).length;
+  }
+
+  const modalId = 'modal-demoler';
+  if (document.getElementById(modalId)) document.getElementById(modalId).remove();
+
+  const popupHtml = `
+    <div class="modal-overlay" id="${modalId}" onclick="cerrarPopupDemoler(event)">
+      <div class="modal-popup" onclick="event.stopPropagation()" style="border-color: #944;">
+        <div class="modal-header" style="background: linear-gradient(135deg, #6b2020 0%, #3d1515 100%);">
+          <span class="modal-icono">${edificio.icono}</span>
+          <h3>Demoler ${instancia.nombre}</h3>
+          <button class="btn-cerrar" onclick="cerrarPopupDemoler()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc" style="color: #ffaaaa;">⚠️ ¿Estás seguro de que quieres demoler este edificio?</p>
+          <p class="modal-info">Esta acción eliminará el edificio y devolverá los recursos invertidos.</p>
+          <hr>
+          <h4>📦 Recursos a recuperar:</h4>
+          <div class="recursos-refund-lista" style="padding: 0.5rem; background: rgba(0,100,0,0.2); border-radius: 4px; margin: 0.5rem 0;">
+            ${recursosADevolver}
+          </div>
+          ${trabajadoresAsignados > 0 ? `
+            <p class="modal-warning" style="color: #ffcc00; margin-top: 0.5rem;">
+              👷 ${trabajadoresAsignados} cuota(s) de población serán desasignadas.
+            </p>
+          ` : ''}
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancelar" onclick="cerrarPopupDemoler()">Cancelar</button>
+          <button class="btn-confirmar" style="background: #8b0000; border-color: #aa2020;" onclick="confirmarDemoler()">
+            🗑️ Confirmar Demolición
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', popupHtml);
+}
+
+function cerrarPopupDemoler(event) {
+  if (event && event.target.id !== 'modal-demoler') return;
+  const modal = document.getElementById('modal-demoler');
+  if (modal) modal.remove();
+  popupDemolerActivo = null;
+}
+
+function confirmarDemoler() {
+  if (!popupDemolerActivo) return;
+
+  const instanciaId = popupDemolerActivo;
+  const edificios = estadoApp.asentamiento.edificios || [];
+
+  // Buscar la instancia
+  let instanciaIdx = -1;
+  let instancia = null;
+
+  for (let i = 0; i < edificios.length; i++) {
+    const e = edificios[i];
+    if (typeof e === 'string') {
+      // Legacy format
+      const legacyId = `${e}_legacy_${i}`;
+      if (legacyId === instanciaId) {
+        instanciaIdx = i;
+        instancia = { id: legacyId, nombre: e };
+        break;
+      }
+    } else if (e.id === instanciaId) {
+      instanciaIdx = i;
+      instancia = e;
+      break;
+    }
+  }
+
+  if (instanciaIdx === -1 || !instancia) {
+    mostrarNotificacion('⚠️ Error: Edificio no encontrado', 'error');
+    cerrarPopupDemoler();
+    return;
+  }
+
+  const edificio = EDIFICIOS[instancia.nombre];
+  if (!edificio) {
+    mostrarNotificacion('⚠️ Error: Definición no encontrada', 'error');
+    cerrarPopupDemoler();
+    return;
+  }
+
+  // 1. Devolver recursos (primera opción de coste)
+  const costesG1 = edificio.costesG1 || [];
+  const MULTIPLICADOR = 10;
+
+  if (costesG1.length > 0) {
+    refundCostBlock(costesG1[0], MULTIPLICADOR);
+  }
+
+  // 2. Desasignar trabajadores
+  const tokenId = `edificio_id:${instanciaId}`;
+  const tokenNombre = `edificio:${instancia.nombre}`;
+
+  if (estadoSimulacion.poblacion) {
+    estadoSimulacion.poblacion.forEach(cuota => {
+      if (cuota.asignacion === tokenId || cuota.asignacion === tokenNombre) {
+        cuota.asignacion = null;
+      }
+    });
+  }
+
+  // 3. Eliminar el edificio de la lista
+  estadoApp.asentamiento.edificios.splice(instanciaIdx, 1);
+
+  // 4. Eliminar el estado del edificio
+  if (estadoSimulacion.edificiosEstado && estadoSimulacion.edificiosEstado[instanciaId]) {
+    delete estadoSimulacion.edificiosEstado[instanciaId];
+  }
+
+  // 5. Guardar y actualizar UI
+  guardarExpedicion();
+  cerrarPopupDemoler();
+  actualizarHUD();
+
+  mostrarNotificacion(`🗑️ ${instancia.nombre} demolido. Recursos devueltos.`, 'success');
+  console.log(`🗑️ Edificio demolido: ${instancia.nombre} (ID: ${instanciaId})`);
+}
+
+// =====================================================
+// CANCELAR CONSTRUCCIÓN EN PROGRESO
+// =====================================================
+
+/**
+ * Cancela una construcción en progreso y devuelve los recursos invertidos
+ * @param {string} construccionId - ID de la construcción a cancelar
+ */
+function cancelarConstruccionEnProgreso(construccionId) {
+  if (!estadoSimulacion.construccionesEnProgreso) return;
+
+  const idx = estadoSimulacion.construccionesEnProgreso.findIndex(c => c.id === construccionId);
+  if (idx === -1) {
+    mostrarNotificacion('⚠️ Construcción no encontrada', 'error');
+    return;
+  }
+
+  const construccion = estadoSimulacion.construccionesEnProgreso[idx];
+
+  // Confirmar cancelación
+  const edificio = EDIFICIOS[construccion.nombre];
+  const nombreDisplay = construccion.esMejora ? `mejora de ${construccion.nombre}` : construccion.nombre;
+
+  if (!confirm(`¿Cancelar la construcción de ${nombreDisplay}?\n\nLos recursos invertidos serán devueltos.`)) {
+    return;
+  }
+
+  // 1. Devolver recursos usando el coste almacenado
+  const MULTIPLICADOR = 10;
+  if (construccion.costoOpcion && Object.keys(construccion.costoOpcion).length > 0) {
+    refundCostBlock(construccion.costoOpcion, MULTIPLICADOR);
+
+    // Log de recursos devueltos
+    const recursosDevueltos = Object.entries(construccion.costoOpcion)
+      .map(([r, c]) => `${c * MULTIPLICADOR} ${r}`)
+      .join(', ');
+    console.log(`📦 Recursos devueltos: ${recursosDevueltos}`);
+  }
+
+  // 2. Eliminar de la cola de construcciones
+  estadoSimulacion.construccionesEnProgreso.splice(idx, 1);
+
+  // 3. Guardar y actualizar UI
+  guardarExpedicion();
+  actualizarHUD();
+
+  mostrarNotificacion(`❌ Construcción de ${nombreDisplay} cancelada. Recursos devueltos.`, 'success');
+  console.log(`❌ Construcción cancelada: ${construccion.nombre} (ID: ${construccionId})`);
+}
+
+// =====================================================
+// FUNCIONES DE DEVOCIÓN
+// =====================================================
+
+/**
+ * Convierte un Plebeyo en Devoto del tipo seleccionado
+ */
+function convertirPlebeyoADevoto() {
+  if (!estadoSimulacion.poblacion) return;
+
+  // Obtener el tipo de devoción seleccionado
+  const selectTipo = document.getElementById('select-tipo-devoto');
+  const tipoDevocion = selectTipo?.value || 'Neutral';
+
+  // Buscar un Plebeyo para convertir (preferir uno de la misma naturaleza)
+  let plebeyo = estadoSimulacion.poblacion.find(c =>
+    c.rol === 'Plebeyo' && c.naturaleza === tipoDevocion
+  );
+
+  // Si no hay de esa naturaleza, buscar cualquier plebeyo
+  if (!plebeyo) {
+    plebeyo = estadoSimulacion.poblacion.find(c => c.rol === 'Plebeyo');
+  }
+
+  if (!plebeyo) {
+    mostrarNotificacion('⚠️ No hay Plebeyos disponibles para convertir', 'error');
+    return;
+  }
+
+  // Verificar que la naturaleza puede tener devoción
+  const natData = typeof NATURALEZAS_POBLACION !== 'undefined' ? NATURALEZAS_POBLACION[plebeyo.naturaleza] : null;
+  if (natData?.puedeDevocion === false) {
+    mostrarNotificacion(`⚠️ Las cuotas ${plebeyo.naturaleza} no pueden tener devoción`, 'error');
+    return;
+  }
+
+  // Convertir
+  plebeyo.rol = 'Devoto';
+
+  // Si la naturaleza es diferente al tipo de devoción seleccionado, ajustar
+  // (Monstruos generan devoción Salvaje automáticamente según la UI)
+
+  guardarExpedicion();
+  actualizarHUD();
+
+  const tipoData = typeof TIPOS_DEVOCION !== 'undefined' ? TIPOS_DEVOCION[tipoDevocion] : null;
+  mostrarNotificacion(`🙏 Plebeyo convertido a Devoto ${tipoData?.icono || ''} ${tipoDevocion}`, 'success');
+}
+
+/**
+ * Activa el Pacto Sincrético entre las dos devociones activas
+ */
+function pactarSincretismo() {
+  if (!estadoSimulacion.estadoDevocion) return;
+
+  const devocion = estadoSimulacion.estadoDevocion;
+
+  // Verificar que no hay sacrilegio
+  if (devocion.sacrilegio) {
+    mostrarNotificacion('❌ No se puede pactar sincretismo durante Sacrilegio', 'error');
+    return;
+  }
+
+  // Obtener tipos activos (con devotos)
+  const devotosPorTipo = { Positiva: 0, Negativa: 0, Neutral: 0, Salvaje: 0 };
+  estadoSimulacion.poblacion?.forEach(c => {
+    if (c.rol === 'Devoto') {
+      const tipoNat = c.naturaleza || 'Neutral';
+      if (tipoNat === 'Monstruo') {
+        devotosPorTipo['Salvaje']++;
+      } else if (devotosPorTipo[tipoNat] !== undefined) {
+        devotosPorTipo[tipoNat]++;
+      }
+    }
+  });
+
+  const tiposActivos = Object.entries(devotosPorTipo)
+    .filter(([_, count]) => count > 0)
+    .map(([tipo, _]) => tipo);
+
+  if (tiposActivos.length < 2) {
+    mostrarNotificacion('⚠️ Se requieren 2 devociones activas para sincretismo', 'error');
+    return;
+  }
+
+  // Verificar que las dos primeras no son opuestas
+  const tipo1 = tiposActivos[0];
+  const tipo2 = tiposActivos[1];
+
+  const sonOpuestos = typeof sonDevocioneOpuestas === 'function'
+    ? sonDevocioneOpuestas(tipo1, tipo2)
+    : (TIPOS_DEVOCION[tipo1]?.opuesto === tipo2);
+
+  if (sonOpuestos) {
+    mostrarNotificacion('❌ No se puede sincretizar devociones opuestas', 'error');
+    return;
+  }
+
+  // Activar sincretismo
+  devocion.isSyncretic = true;
+  devocion.syncreticTypes = [tipo1, tipo2];
+
+  guardarExpedicion();
+  actualizarHUD();
+
+  const t1 = TIPOS_DEVOCION[tipo1];
+  const t2 = TIPOS_DEVOCION[tipo2];
+  mostrarNotificacion(`🤝 Sincretismo pactado: ${t1?.icono || ''} ${tipo1} + ${t2?.icono || ''} ${tipo2}`, 'success');
+}
+
+/**
+ * Rompe el Pacto Sincrético activo
+ */
+function romperSincretismo() {
+  if (!estadoSimulacion.estadoDevocion) return;
+
+  const devocion = estadoSimulacion.estadoDevocion;
+
+  if (!devocion.isSyncretic) {
+    mostrarNotificacion('⚠️ No hay sincretismo activo', 'error');
+    return;
+  }
+
+  devocion.isSyncretic = false;
+  devocion.syncreticTypes = [];
+
+  guardarExpedicion();
+  actualizarHUD();
+
+  mostrarNotificacion('💔 Sincretismo disuelto', 'warning');
+}
+
+/**
+ * Invoca un milagro, consumiendo puntos del pool correspondiente
+ * @param {string} tipoDevocion - Tipo de devoción (Positiva, Negativa, etc.)
+ * @param {string} nombreMilagro - Nombre del milagro a invocar
+ */
+function invocarMilagro(tipoDevocion, nombreMilagro) {
+  if (!estadoSimulacion.estadoDevocion) return;
+
+  const devocion = estadoSimulacion.estadoDevocion;
+  const milagrosTipo = typeof MILAGROS !== 'undefined' ? MILAGROS[tipoDevocion] : null;
+  const milagro = milagrosTipo?.[nombreMilagro];
+
+  if (!milagro) {
+    mostrarNotificacion('⚠️ Milagro no encontrado', 'error');
+    return;
+  }
+
+  // Calcular coste ajustado
+  let modCoste = 0;
+  if (devocion.sacrilegio) modCoste += 20;
+  if (devocion.isSyncretic) modCoste -= 20;
+  const costeAjustado = milagro.coste + modCoste;
+
+  // Verificar pool
+  const pool = devocion.poolPorTipo[tipoDevocion] || 0;
+  if (pool < costeAjustado) {
+    mostrarNotificacion(`❌ Puntos insuficientes (${pool}/${costeAjustado})`, 'error');
+    return;
+  }
+
+  // Verificar grado
+  const totalDevotos = estadoSimulacion.poblacion?.filter(c => c.rol === 'Devoto').length || 0;
+  const gradoDevocion = typeof calcularGradoDevocion === 'function'
+    ? calcularGradoDevocion(totalDevotos)
+    : (totalDevotos >= 300 ? 3 : totalDevotos >= 60 ? 2 : 1);
+
+  if (milagro.grado > gradoDevocion) {
+    mostrarNotificacion(`🔒 Grado de fe insuficiente (${gradoDevocion}/${milagro.grado})`, 'error');
+    return;
+  }
+
+  // Consumir puntos
+  devocion.poolPorTipo[tipoDevocion] -= costeAjustado;
+
+  // Registrar en log de eventos (si existe el sistema)
+  if (estadoApp.asentamiento && !estadoApp.asentamiento.historialEventos) {
+    estadoApp.asentamiento.historialEventos = [];
+  }
+  if (estadoApp.asentamiento?.historialEventos) {
+    estadoApp.asentamiento.historialEventos.push({
+      tipo: 'Milagro',
+      descripcion: `${nombreMilagro}: ${milagro.efecto}`,
+      turno: estadoSimulacion.turno
+    });
+  }
+
+  guardarExpedicion();
+  actualizarHUD();
+
+  const tipoData = typeof TIPOS_DEVOCION !== 'undefined' ? TIPOS_DEVOCION[tipoDevocion] : null;
+  mostrarNotificacion(`✨ ¡Milagro invocado! ${tipoData?.icono || ''} ${nombreMilagro}`, 'success');
+  console.log(`✨ Milagro: ${nombreMilagro} (${tipoDevocion}) - Coste: ${costeAjustado}, Efecto: ${milagro.efecto}`);
 }
 
 

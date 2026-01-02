@@ -181,13 +181,18 @@ function calcularEstadisticasTotales(asentamiento) {
         bonificacionesTotales[key] = (bonificacionesTotales[key] || 0) + value;
     });
 
+    // Calcular penalización de calidad por tamaño de población (-1 por cada 10 cuotas)
+    const poblacionTotal = estadoSimulacion?.poblacion?.length || 0;
+    const penalizacionPoblacion = Math.floor(poblacionTotal / 10);
+
     return {
         grado: gradoStats,
         bonificaciones: bonificacionesTotales,
         tributo: tributoData,
         efectosEdificios: efectosEdificios,
         mantenimientoEdificios: mantenimientoTotal,
-        calidadTotal: gradoStats.calidad + (bonificaciones["Calidad"] || 0) + tributoData.calidad + (efectosEdificios.calidad || 0) + calidadEventos,
+        calidadTotal: gradoStats.calidad + (bonificaciones["Calidad"] || 0) + tributoData.calidad + (efectosEdificios.calidad || 0) + calidadEventos - penalizacionPoblacion,
+        penalizacionPoblacion: penalizacionPoblacion, // Para mostrar en UI
         almacenamientoBonus: efectosEdificios.almacenamiento || 0,
         ingresosDoblones: efectosEdificios.ingresos || 0
     };

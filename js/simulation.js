@@ -41,7 +41,22 @@ let estadoSimulacion = {
     // Construcciones en progreso: [{ id, nombre, turnosRestantes, turnosTotales, poblacionAsignada, costoOpcion }]
     construccionesEnProgreso: [],
     // Historial de comercio: [{ turno, recurso, cantidad, tipo: 'entrada'|'salida', comerciante }]
-    historialComercio: []
+    historialComercio: [],
+    // Estado de Devoción
+    estadoDevocion: {
+        // Pool de puntos por tipo de devoción (cap 100 cada uno)
+        poolPorTipo: { Positiva: 0, Negativa: 0, Neutral: 0, Salvaje: 0 },
+        // Flag de sincretismo activo
+        isSyncretic: false,
+        // Tipos en sincretismo (máx 2)
+        syncreticTypes: [],
+        // Tipo de devoción dominante (con más devotos)
+        dominantType: null,
+        // Flag de sacrilegio (devociones opuestas activas)
+        sacrilegio: false,
+        // Contador de turnos de sacrilegio
+        turnosSacrilegio: 0
+    }
 };
 
 /**
@@ -275,7 +290,7 @@ function ejecutarTurno(asentamiento) {
 
     // Save snapshot for undo functionality BEFORE making changes
     if (typeof guardarSnapshotTurno === 'function') {
-        guardarSnapshotTurno();
+        guardarSnapshotTurno(asentamiento);
     }
 
     // Initialize log array
@@ -299,11 +314,15 @@ function ejecutarTurno(asentamiento) {
         // Fase 3: Crecimiento
         const resultadoCrecimiento = faseCrecimiento(asentamiento);
 
+        // Fase 4: Devoción (generar puntos por devotos)
+        const resultadoDevocion = faseDevocion();
+
         return {
             turno: estadoSimulacion.turno,
             sustento: resultadoSustento,
             economia: resultadoEconomia,
             crecimiento: resultadoCrecimiento,
+            devocion: resultadoDevocion,
             log: estadoSimulacion.logTurno
         };
     } catch (error) {
@@ -413,6 +432,15 @@ function faseEconomia(asentamiento) {
     const produccionEdificios = calcularProduccionEdificios(asentamiento.edificios || [], stats);
 
     Object.entries(produccionEdificios).forEach(([recurso, data]) => {
+        // Handle Doblones specially - they go to doblones, not almacen
+        if (recurso === "Doblones") {
+            if (data.total > 0) {
+                estadoSimulacion.doblones += data.total;
+                logear(`  💰 Producción de edificios: +${data.total} Doblones`);
+            }
+            return;
+        }
+
         // Handle positive production
         if (data.total > 0) {
             estadoSimulacion.almacen[recurso] = (estadoSimulacion.almacen[recurso] || 0) + data.total;
@@ -597,16 +625,15 @@ function faseCrecimiento(asentamiento) {
     const reproduccionPorTipo = { Neutral: 0, Positiva: 0, Negativa: 0, Monstruo: 0, Artificial: 0 };
 
     if (globalPuedeReproducir) {
+        // Reproducción = 1 por cada cuota de población (sin importar rol)
         estadoSimulacion.poblacion.forEach(cuota => {
-            if (cuota.rol === "Plebeyo") {
-                const tipo = cuota.naturaleza || "Neutral";
-                const nat = NATURALEZAS_POBLACION[tipo];
+            const tipo = cuota.naturaleza || "Neutral";
+            const nat = NATURALEZAS_POBLACION[tipo];
 
-                // Solo reproduce si la naturaleza lo permite
-                if (nat?.puedeReproducir !== false) {
-                    if (reproduccionPorTipo[tipo] !== undefined) {
-                        reproduccionPorTipo[tipo] += 1;
-                    }
+            // Solo reproduce si la naturaleza lo permite
+            if (nat?.puedeReproducir !== false) {
+                if (reproduccionPorTipo[tipo] !== undefined) {
+                    reproduccionPorTipo[tipo] += 1;
                 }
             }
         });
@@ -685,6 +712,107 @@ function faseCrecimiento(asentamiento) {
     return { inmigracionTotal, reproduccionPorTipo, nuevasCuotas };
 }
 
+/**
+ * Fase 4: Devoción
+ * Genera puntos de devoción por cada Devoto activo
+ */
+function faseDevocion() {
+    logear("📍 Fase 4: Devoción");
+
+    // Inicializar estado de devoción si no existe
+    if (!estadoSimulacion.estadoDevocion) {
+        estadoSimulacion.estadoDevocion = {
+            poolPorTipo: { Positiva: 0, Negativa: 0, Neutral: 0, Salvaje: 0 },
+            isSyncretic: false,
+            syncreticTypes: [],
+            dominantType: null,
+            sacrilegio: false,
+            turnosSacrilegio: 0
+        };
+    }
+
+    const devocion = estadoSimulacion.estadoDevocion;
+    const CAP_DEVOCION = 100;
+
+    // Contar devotos por tipo de naturaleza
+    const devotosPorTipo = { Positiva: 0, Negativa: 0, Neutral: 0, Salvaje: 0 };
+    let totalDevotos = 0;
+
+    if (estadoSimulacion.poblacion) {
+        estadoSimulacion.poblacion.forEach(cuota => {
+            if (cuota.rol === "Devoto") {
+                const tipoNat = cuota.naturaleza || "Neutral";
+
+                // Mapear naturaleza a tipo de devoción
+                if (tipoNat === "Positiva" || tipoNat === "Negativa" || tipoNat === "Neutral") {
+                    devotosPorTipo[tipoNat]++;
+                    totalDevotos++;
+                } else if (tipoNat === "Monstruo") {
+                    // Monstruos generan devoción Salvaje
+                    devotosPorTipo["Salvaje"]++;
+                    totalDevotos++;
+                }
+                // Artificiales no generan devoción
+            }
+        });
+    }
+
+    // Generar puntos de devoción (+1 por devoto)
+    let generacion = {};
+    Object.entries(devotosPorTipo).forEach(([tipo, count]) => {
+        if (count > 0) {
+            const antes = devocion.poolPorTipo[tipo] || 0;
+            devocion.poolPorTipo[tipo] = Math.min(CAP_DEVOCION, antes + count);
+            generacion[tipo] = count;
+
+            if (devocion.poolPorTipo[tipo] >= CAP_DEVOCION) {
+                logear(`  🙏 ${tipo}: +${count} → ${devocion.poolPorTipo[tipo]} (¡MÁXIMO!)`);
+            } else {
+                logear(`  🙏 ${tipo}: +${count} → ${devocion.poolPorTipo[tipo]}`);
+            }
+        }
+    });
+
+    // Detectar sacrilegio (tipos opuestos con devotos activos)
+    const haySacrilegio = (devotosPorTipo["Positiva"] > 0 && devotosPorTipo["Negativa"] > 0) ||
+        (devotosPorTipo["Neutral"] > 0 && devotosPorTipo["Salvaje"] > 0);
+
+    if (haySacrilegio && !devocion.sacrilegio) {
+        logear("  ⚠️ ¡SACRILEGIO! Devociones opuestas detectadas.");
+    }
+    devocion.sacrilegio = haySacrilegio;
+
+    if (haySacrilegio) {
+        devocion.turnosSacrilegio++;
+        logear(`  💀 Turnos en sacrilegio: ${devocion.turnosSacrilegio}`);
+    } else {
+        devocion.turnosSacrilegio = 0;
+    }
+
+    // Determinar tipo dominante
+    let maxDevotos = 0;
+    let dominante = null;
+    Object.entries(devotosPorTipo).forEach(([tipo, count]) => {
+        if (count > maxDevotos) {
+            maxDevotos = count;
+            dominante = tipo;
+        }
+    });
+    devocion.dominantType = dominante;
+
+    if (totalDevotos === 0) {
+        logear("  ⚪ Sin devotos activos.");
+    }
+
+    return {
+        totalDevotos,
+        generacion,
+        sacrilegio: haySacrilegio,
+        dominante,
+        pools: { ...devocion.poolPorTipo }
+    };
+}
+
 // =====================================================
 // HELPERS
 // =====================================================
@@ -754,7 +882,7 @@ function resetearSimulacion() {
 /**
  * Guarda una copia profunda del estado actual antes de ejecutar un turno
  */
-function guardarSnapshotTurno() {
+function guardarSnapshotTurno(asentamiento) {
     const snapshot = JSON.parse(JSON.stringify({
         turno: estadoSimulacion.turno,
         poblacion: estadoSimulacion.poblacion,
@@ -762,10 +890,13 @@ function guardarSnapshotTurno() {
         doblones: estadoSimulacion.doblones,
         alimentos: estadoSimulacion.alimentos,
         inmigracionPendiente: estadoSimulacion.inmigracionPendiente,
+        inmigracionPendientePorTipo: estadoSimulacion.inmigracionPendientePorTipo,
         recursosEspeciales: estadoSimulacion.recursosEspeciales,
         edificiosEstado: estadoSimulacion.edificiosEstado,
         construccionesEnProgreso: estadoSimulacion.construccionesEnProgreso,
-        historialComercio: estadoSimulacion.historialComercio
+        historialComercio: estadoSimulacion.historialComercio,
+        // Guardar edificios del asentamiento para restaurar al deshacer
+        asentamientoEdificios: asentamiento?.edificios || []
     }));
 
     // Mantener solo los últimos 5 snapshots
@@ -782,7 +913,7 @@ function guardarSnapshotTurno() {
 function deshacerTurno() {
     if (estadoSimulacion.historialTurnos.length === 0) {
         console.log("No hay turnos para deshacer");
-        return false;
+        return null;
     }
 
     const snapshot = estadoSimulacion.historialTurnos.pop();
@@ -796,6 +927,9 @@ function deshacerTurno() {
     estadoSimulacion.doblones = snapshot.doblones;
     estadoSimulacion.alimentos = snapshot.alimentos || 0;
     estadoSimulacion.inmigracionPendiente = snapshot.inmigracionPendiente;
+    estadoSimulacion.inmigracionPendientePorTipo = snapshot.inmigracionPendientePorTipo || {
+        Neutral: 0, Positiva: 0, Negativa: 0, Monstruo: 0, Artificial: 0
+    };
     estadoSimulacion.recursosEspeciales = snapshot.recursosEspeciales;
     estadoSimulacion.edificiosEstado = snapshot.edificiosEstado;
     estadoSimulacion.construccionesEnProgreso = snapshot.construccionesEnProgreso || [];
@@ -803,7 +937,11 @@ function deshacerTurno() {
     estadoSimulacion.historialTurnos = historialActual;
     estadoSimulacion.logTurno = ["⏪ Turno deshecho"];
 
-    return true;
+    // Devolver los edificios del asentamiento para restaurarlos en la UI
+    return {
+        success: true,
+        asentamientoEdificios: snapshot.asentamientoEdificios || null
+    };
 }
 
 // =====================================================
@@ -870,11 +1008,21 @@ function avanzarConstrucciones(asentamiento) {
                 if (asentamiento && asentamiento.edificios) {
                     if (c.esMejora) {
                         // Es una mejora de edificio existente
-                        const edificoExistente = asentamiento.edificios.find(e => e.id === c.edificioId);
-                        if (edificoExistente && estadoSimulacion.edificiosEstado[c.edificioId]) {
-                            estadoSimulacion.edificiosEstado[c.edificioId].grado++;
-                            // También podríamos actualizar el objeto en asentamiento.edificios si guardamos grado allí,
-                            // pero parece que el grado vive en `edificiosEstado`.
+                        const edificioExistente = asentamiento.edificios.find(e => e.id === c.edificioId);
+                        if (edificioExistente) {
+                            // Actualizar el grado en el objeto del edificio
+                            edificioExistente.grado = (edificioExistente.grado || 1) + 1;
+
+                            // También actualizar en edificiosEstado para sincronizar
+                            if (!estadoSimulacion.edificiosEstado) {
+                                estadoSimulacion.edificiosEstado = {};
+                            }
+                            if (!estadoSimulacion.edificiosEstado[c.edificioId]) {
+                                estadoSimulacion.edificiosEstado[c.edificioId] = { grado: 1 };
+                            }
+                            estadoSimulacion.edificiosEstado[c.edificioId].grado = edificioExistente.grado;
+
+                            logear(`📈 ${c.nombre} mejorado a Grado ${edificioExistente.grado}`);
                         }
                     } else {
                         // Nuevo edificio
@@ -1087,6 +1235,19 @@ function calcularProduccionEdificios(edificiosConstruidos, stats = null) {
 
         estado.cuotasAsignadas = cuotasEfectivas;
 
+        // === PRODUCCIÓN PASIVA DE EDIFICIOS ===
+        // Mercado produce 1 Doblón pasivo por existir (sin necesidad de trabajadores)
+        if (nombreEdificio === "Mercado") {
+            const pasivo = 1;
+            produccion["Doblones"] = produccion["Doblones"] || { total: 0, fuentes: [] };
+            produccion["Doblones"].total += pasivo;
+            produccion["Doblones"].fuentes.push({
+                edificio: `${nombreEdificio} (Pasivo)`,
+                cuotas: 0,
+                produccion: pasivo
+            });
+        }
+
         if (cuotasEfectivas <= 0) return;
 
         const edificioDef = EDIFICIOS[nombreEdificio];
@@ -1168,7 +1329,9 @@ function calcularProduccionEdificios(edificiosConstruidos, stats = null) {
                 if (pt.condicion === 'per_5_pop') {
                     const totalPop = estadoSimulacion.poblacion.length || 0;
                     const base = Math.floor(totalPop / 5);
-                    cantidad = base * cuotasEfectivas;
+                    // Bonificador de calidad: +1 por cada 5 puntos de calidad
+                    const bonoCalidad = Math.floor(calidad / 5);
+                    cantidad = (base + bonoCalidad) * cuotasEfectivas;
                 } else {
                     cantidad = pt.cantidad * cuotasEfectivas;
                 }

@@ -132,6 +132,13 @@ const ROLES_POBLACION = {
         beneficio: "Mantiene guarnición",
         requisito: "Cuartel",
         color: "#DC143C"
+    },
+    "Devoto": {
+        icono: "🙏",
+        funcion: "Generación de Fe",
+        beneficio: "+1 Devoción/turno del tipo de la cuota",
+        requisito: "Plaza de Adoración o Sitio Sagrado",
+        color: "#9932CC"
     }
 };
 
@@ -1601,12 +1608,223 @@ function obtenerModificadorAbundancia(nivel) {
     return NIVELES_ABUNDANCIA[nivel]?.modificador ?? 0;
 }
 
+// =====================================================
+// SISTEMA DE DEVOCIÓN
+// =====================================================
+
+/**
+ * Tipos de Devoción con sus oposiciones
+ * Positiva <-> Negativa
+ * Neutral <-> Salvaje
+ */
+const TIPOS_DEVOCION = {
+    "Positiva": {
+        icono: "☀️",
+        opuesto: "Negativa",
+        color: "#ffd700",
+        descripcion: "Fe en divinidades celestiales y del orden"
+    },
+    "Negativa": {
+        icono: "🌑",
+        opuesto: "Positiva",
+        color: "#8b0000",
+        descripcion: "Culto a entidades oscuras y caóticas"
+    },
+    "Neutral": {
+        icono: "⚖️",
+        opuesto: "Salvaje",
+        color: "#708090",
+        descripcion: "Veneración del equilibrio y la razón"
+    },
+    "Salvaje": {
+        icono: "🌿",
+        opuesto: "Neutral",
+        color: "#228b22",
+        descripcion: "Respeto a los espíritus de la naturaleza"
+    }
+};
+
+/**
+ * Base de datos de Milagros
+ * Estructura: { tipo: { nombreMilagro: { grado, coste, efecto, objetivo?, variable? } } }
+ */
+const MILAGROS = {
+    "Positiva": {
+        "Templanza al Herido": {
+            grado: 1, coste: 40,
+            efecto: "Reduce el daño recibido a la Resolución de un Regimiento durante una batalla.",
+            objetivo: "regimiento"
+        },
+        "Poder y Valor": {
+            grado: 1, coste: 30, variable: true,
+            efecto: "Otorga +X de Ataque y Defensa a un Regimiento. El coste aumenta con X.",
+            objetivo: "regimiento"
+        },
+        "Curar Enfermedad": {
+            grado: 1, coste: 35,
+            efecto: "Elimina una enfermedad o maldición menor de la población.",
+            objetivo: "asentamiento"
+        },
+        "Bendición de Cosecha": {
+            grado: 2, coste: 50,
+            efecto: "+2 a la Producción Agrícola durante 3 turnos.",
+            objetivo: "asentamiento"
+        },
+        "Santuario Protector": {
+            grado: 2, coste: 60,
+            efecto: "Crea una barrera que otorga +2 Defensa contra Monstruos.",
+            objetivo: "asentamiento"
+        },
+        "Gracia a los Dioses": {
+            grado: 3, coste: 80,
+            efecto: "Terraforma el bioma del asentamiento a Tierras Consagradas.",
+            objetivo: "asentamiento"
+        },
+        "Resurrección": {
+            grado: 3, coste: 100,
+            efecto: "Restaura 1 Cuota de población perdida en combate recientemente.",
+            objetivo: "asentamiento"
+        }
+    },
+    "Negativa": {
+        "Corromper": {
+            grado: 1, coste: 40,
+            efecto: "Genera +10 de Devoción Negativa en un asentamiento enemigo.",
+            objetivo: "asentamiento_enemigo"
+        },
+        "Agriar": {
+            grado: 1, coste: 40,
+            efecto: "Destruye hasta 20 medidas de Alimento en el objetivo.",
+            objetivo: "asentamiento"
+        },
+        "Maldición Menor": {
+            grado: 1, coste: 30,
+            efecto: "Reduce la Calidad del asentamiento enemigo en -2 por 3 turnos.",
+            objetivo: "asentamiento_enemigo"
+        },
+        "Invocar Horror": {
+            grado: 2, coste: 55,
+            efecto: "Invoca una criatura de pesadilla que ataca un asentamiento.",
+            objetivo: "asentamiento_enemigo"
+        },
+        "Plaga": {
+            grado: 2, coste: 65,
+            efecto: "Propaga enfermedad: -1 Cuota de población y -3 Calidad por 2 turnos.",
+            objetivo: "asentamiento_enemigo"
+        },
+        "Maledicto Terrenal": {
+            grado: 3, coste: 60,
+            efecto: "Terraforma el bioma del objetivo a Tierras Malditas.",
+            objetivo: "casilla"
+        },
+        "Despertar No-Muerto": {
+            grado: 3, coste: 90,
+            efecto: "Convierte 2 Cuotas de población en Cuotas Artificiales No-Muertas.",
+            objetivo: "asentamiento"
+        }
+    },
+    "Neutral": {
+        "Noble Labor": {
+            grado: 1, coste: 40,
+            efecto: "Completa instantáneamente una construcción en progreso.",
+            objetivo: "construccion"
+        },
+        "Clarividencia": {
+            grado: 1, coste: 25,
+            efecto: "Revela información sobre una casilla o asentamiento enemigo.",
+            objetivo: "casilla"
+        },
+        "Pacificar": {
+            grado: 1, coste: 35,
+            efecto: "Evita un combate inminente, forzando negociación.",
+            objetivo: "regimiento"
+        },
+        "Fantasía": {
+            grado: 2, coste: 70,
+            efecto: "Aumenta la Capacidad Mágica del asentamiento en +2 permanentemente.",
+            objetivo: "asentamiento"
+        },
+        "Equilibrio Cósmico": {
+            grado: 2, coste: 55,
+            efecto: "Neutraliza efectos de Sacrilegio por 5 turnos.",
+            objetivo: "asentamiento"
+        },
+        "Juicio Divino": {
+            grado: 3, coste: 85,
+            efecto: "Elimina todas las bonificaciones de devoción de un asentamiento enemigo.",
+            objetivo: "asentamiento_enemigo"
+        }
+    },
+    "Salvaje": {
+        "Tránsito Libre": {
+            grado: 1, coste: 30,
+            efecto: "+2 de Movilidad a todos los Regimientos por 3 turnos.",
+            objetivo: "asentamiento"
+        },
+        "Llamada de la Manada": {
+            grado: 1, coste: 35,
+            efecto: "Atrae animales: +50% producción de Pieles y Carne por 2 turnos.",
+            objetivo: "asentamiento"
+        },
+        "Comunión Natural": {
+            grado: 1, coste: 25,
+            efecto: "Revela todos los recursos ocultos en una casilla.",
+            objetivo: "casilla"
+        },
+        "Furia Ancestral": {
+            grado: 2, coste: 20, variable: true,
+            efecto: "+X de daño masivo a un Regimiento. El coste aumenta con X.",
+            objetivo: "regimiento"
+        },
+        "Muralla de Espinas": {
+            grado: 2, coste: 50,
+            efecto: "Crea defensas naturales: +3 Defensa en asedios por 3 turnos.",
+            objetivo: "asentamiento"
+        },
+        "Avatar del Bosque": {
+            grado: 3, coste: 95,
+            efecto: "Invoca un elemental guardian que defiende el asentamiento.",
+            objetivo: "asentamiento"
+        },
+        "Renacer Primigenio": {
+            grado: 3, coste: 75,
+            efecto: "Restaura un bioma dañado a su estado natural original.",
+            objetivo: "casilla"
+        }
+    }
+};
+
+/**
+ * Calcula el grado de devoción basado en cuotas de devotos
+ * @param {number} cuotasDevotos - Número de cuotas de devotos
+ * @returns {number} - Grado de devoción (1, 2 o 3)
+ */
+function calcularGradoDevocion(cuotasDevotos) {
+    if (cuotasDevotos >= 300) return 3;
+    if (cuotasDevotos >= 60) return 2;
+    return 1;
+}
+
+/**
+ * Verifica si dos tipos de devoción son opuestos (causan Sacrilegio)
+ * @param {string} tipo1 
+ * @param {string} tipo2 
+ * @returns {boolean}
+ */
+function sonDevocioneOpuestas(tipo1, tipo2) {
+    const t1 = TIPOS_DEVOCION[tipo1];
+    const t2 = TIPOS_DEVOCION[tipo2];
+    if (!t1 || !t2) return false;
+    return t1.opuesto === tipo2 || t2.opuesto === tipo1;
+}
+
 // Exportar para uso en otros módulos
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         PROPIEDADES, PECULIARIDADES, GRADOS, TRIBUTOS, RECURSOS,
         BIOMAS_BASE, BIOMAS_ESPECIALES, NIVELES_ABUNDANCIA, INFLUENCIA_MAGICA,
-        STATS_INVERTIDAS, esStatInvertida, RECETAS_MANUFACTURA, EDIFICIOS, // Added exports
+        STATS_INVERTIDAS, esStatInvertida, RECETAS_MANUFACTURA, EDIFICIOS,
+        TIPOS_DEVOCION, MILAGROS, calcularGradoDevocion, sonDevocioneOpuestas,
         lanzarDado, determinarTipoBioma, determinarSubBioma, fusionarBiomas,
         tirarRecurso, calcularModificadoresRecursos, obtenerModificadorAbundancia
     };
